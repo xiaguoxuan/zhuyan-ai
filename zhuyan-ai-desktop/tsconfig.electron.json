@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "types": ["node", "electron"],
+    "rootDir": ".",
+    "outDir": "dist-electron",
+    "sourceMap": true
+  },
+  "include": [
+    "electron/main.ts",
+    "electron/pi-runtime.ts",
+    "electron/provider-settings.ts",
+    "electron/preload.cts",
+    "shared/**/*.ts"
+  ],
+  "exclude": ["electron/preload.ts"]
+}

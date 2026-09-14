@@ -1,0 +1,10 @@
+node_modules/
+dist-renderer/
+dist-electron/
+packaging/
+release/
+private-audit-input/
+*.log
+.env
+.env.*
+!.env.example

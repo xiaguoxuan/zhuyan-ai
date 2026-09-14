@@ -1,0 +1,42 @@
+{
+  "name": "pi-soft-furnish-agent",
+  "version": "0.8.2",
+  "description": "Pi tools for safely versioned AI soft-furnishing projects and editable version-bound shopping lists",
+  "author": "xiaguoxuan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xiaguoxuan/zhuyan-ai.git",
+    "directory": "pi-soft-furnish-agent"
+  },
+  "bugs": {
+    "url": "https://github.com/xiaguoxuan/zhuyan-ai/issues"
+  },
+  "homepage": "https://github.com/xiaguoxuan/zhuyan-ai#readme",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-agent",
+    "interior-design",
+    "image-editing"
+  ],
+  "files": [
+    "data",
+    "extensions",
+    "skills",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

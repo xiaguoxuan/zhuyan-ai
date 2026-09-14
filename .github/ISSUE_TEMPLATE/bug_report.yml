@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a reproducible non-security problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include API keys, authorization headers, private room photographs, reference images, project directories or sensitive provider logs. Report security issues privately according to SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Desktop version, commit or tag
+      placeholder: "0.10.4"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows x64
+        - macOS arm64
+        - Source build / other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: sanitized_logs
+    attributes:
+      label: Sanitized diagnostic information
+      description: Remove credentials, personal paths, user images, project IDs and provider response headers.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I removed credentials, personal data and images that I do not have permission to share.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

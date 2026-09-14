@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "library_id": "zhuyan-curated-style-recipes-v1",
+  "public_source_images_included": false,
+  "generation_policy": {
+    "spatial_source_priority": "user_room_image",
+    "default_visual_reference_mode": "structured_recipe_only",
+    "maximum_visual_reference_images": 1,
+    "visual_reference_requirement": "Only user-owned or explicitly rights-cleared references may be used outside private internal tests."
+  },
+  "recipes": [
+    {
+      "recipe_id": "warm_white_natural_wood_v1",
+      "name": "暖白原木",
+      "recipe_type": "style_recipe",
+      "status": "curated_v1",
+      "suitable_room_types": ["living_room", "bedroom", "dining_room", "study"],
+      "palette": [
+        {"name": "暖白", "hex": "#F3EFE7", "role": "background", "ratio": 0.50},
+        {"name": "浅橡木", "hex": "#C8A77A", "role": "wood", "ratio": 0.25},
+        {"name": "暖灰米色", "hex": "#B9AEA0", "role": "textile", "ratio": 0.15},
+        {"name": "低饱和陶土或绿色", "hex": "#B97945", "role": "accent", "ratio": 0.10}
+      ],
+      "materials": ["light_oak", "matte_warm_white", "linen", "cotton", "short_pile_rug", "rattan_optional"],
+      "furniture_language": ["low_visual_weight", "slender_legs", "rounded_edges", "simple_wood_grain", "medium_small_scale"],
+      "soft_furnishing": ["warm_white_sheer_curtains", "beige_or_light_gray_rug", "limited_color_cushions", "one_or_two_green_plants", "generic_abstract_art_optional"],
+      "decoration_density": "low_to_medium",
+      "generation_instructions": [
+        "Keep the room bright, natural and lived-in rather than luxurious.",
+        "Use warm white as the dominant background and light natural wood as the secondary visual material.",
+        "Prefer low-profile furniture with visible floor area.",
+        "Use only one restrained accent-color family."
+      ],
+      "avoid": ["dark_heavy_curtains", "glossy_marble_everywhere", "oversized_furniture", "ornate_crystal_chandelier_styling", "high_saturation_palette", "hotel_showroom_feel"]
+    },
+    {
+      "recipe_id": "cream_warm_greige_v1",
+      "name": "奶油暖灰",
+      "recipe_type": "style_recipe",
+      "status": "curated_v1",
+      "suitable_room_types": ["living_room", "bedroom", "dining_room"],
+      "palette": [
+        {"name": "奶油白", "hex": "#F2ECE2", "role": "background", "ratio": 0.50},
+        {"name": "暖灰褐", "hex": "#AAA095", "role": "large_textile", "ratio": 0.22},
+        {"name": "浅木色", "hex": "#C5A47B", "role": "wood", "ratio": 0.18},
+        {"name": "焦糖或陶土", "hex": "#B66F45", "role": "accent", "ratio": 0.10}
+      ],
+      "materials": ["linen", "boucle_optional", "matte_wood", "short_pile_textile", "warm_metal_small_amount"],
+      "furniture_language": ["soft_rounded_forms", "low_contrast", "comfortable_scale", "limited_visual_clutter"],
+      "soft_furnishing": ["full_height_sheer_curtains", "large_warm_beige_rug", "cream_sofa_cover", "terracotta_accent_cushions", "soft_generic_abstract_art_optional"],
+      "decoration_density": "low",
+      "generation_instructions": [
+        "Create a soft cream-and-greige atmosphere with rounded forms and low contrast.",
+        "Keep the result realistic and practical for an ordinary residence.",
+        "Retain breathing room around the main furniture."
+      ],
+      "avoid": ["cold_blue_gray", "pure_stark_white", "excessive_gold", "oversized_curved_sofa_in_small_room", "overexposed_white_image"]
+    },
+    {
+      "recipe_id": "clean_modern_minimal_v1",
+      "name": "现代简约",
+      "recipe_type": "style_recipe",
+      "status": "curated_v1",
+      "suitable_room_types": ["living_room", "bedroom", "dining_room", "study"],
+      "palette": [
+        {"name": "柔白", "hex": "#F4F3F0", "role": "background", "ratio": 0.55},
+        {"name": "浅暖灰", "hex": "#C8C3BC", "role": "secondary", "ratio": 0.22},
+        {"name": "中浅木", "hex": "#B99368", "role": "wood", "ratio": 0.15},
+        {"name": "黑色", "hex": "#262626", "role": "line_accent", "ratio": 0.08}
+      ],
+      "materials": ["matte_warm_white", "light_wood", "clear_glass", "black_metal_small_amount", "plain_woven_fabric"],
+      "furniture_language": ["clean_lines", "functional_storage", "few_objects", "balanced_black_details", "simple_geometry"],
+      "soft_furnishing": ["plain_sheer_curtains", "neutral_rug", "limited_generic_abstract_prints", "limited_plants"],
+      "decoration_density": "low",
+      "generation_instructions": [
+        "Prioritize clean circulation, visual order and practical storage.",
+        "Use black only as a thin outline accent, not a dominant mass.",
+        "Do not remove all signs of real living."
+      ],
+      "avoid": ["sterile_clinic_look", "excessive_led_strips", "all_gloss_surfaces", "too_many_decorations", "unrealistically_empty_room"]
+    },
+    {
+      "recipe_id": "modern_mid_century_color_v1",
+      "name": "现代撞色（含中古元素）",
+      "recipe_type": "style_recipe",
+      "status": "curated_v1",
+      "evidence_note": "以当代撞色为主，只借鉴少量中古元素，不应描述成纯中古风。",
+      "suitable_room_types": ["living_room", "bedroom", "dining_room", "study"],
+      "palette": [
+        {"name": "暖白", "hex": "#EFE9DF", "role": "background", "ratio": 0.42},
+        {"name": "中暖木", "hex": "#6F4934", "role": "wood", "ratio": 0.22},
+        {"name": "焦糖橙", "hex": "#C86D2C", "role": "primary_accent", "ratio": 0.18},
+        {"name": "黑色", "hex": "#202020", "role": "graphic_accent", "ratio": 0.10},
+        {"name": "低饱和绿", "hex": "#66745B", "role": "secondary_accent", "ratio": 0.08}
+      ],
+      "materials": ["medium_warm_wood", "woven_fabric", "black_metal", "brass_small_amount", "colored_glass_small_amount"],
+      "furniture_language": ["slender_legs", "brand_neutral", "geometric_forms", "mixed_round_and_rectangular", "medium_contrast"],
+      "soft_furnishing": ["graphic_rug", "orange_or_caramel_accent", "restrained_gallery_wall_optional", "black_arc_lamp", "one_large_plant"],
+      "decoration_density": "medium",
+      "generation_instructions": [
+        "Borrow caramel accents, black graphic balance and selected warm-wood elements without copying recognizable designer furniture.",
+        "Use restrained color repetition across the room.",
+        "Keep the user's architecture and furniture scale."
+      ],
+      "avoid": ["copying_specific_artwork", "copying_iconic_chair_exactly", "too_many_orange_objects", "retro_theme_park", "dark_room"]
+    },
+    {
+      "recipe_id": "warm_greige_light_luxury_v1",
+      "name": "暖灰轻奢",
+      "recipe_type": "style_recipe",
+      "status": "curated_v1",
+      "suitable_room_types": ["living_room", "bedroom", "dining_room"],
+      "palette": [
+        {"name": "暖灰", "hex": "#A79C91", "role": "background", "ratio": 0.38},
+        {"name": "米色", "hex": "#D9CDBF", "role": "large_textile", "ratio": 0.25},
+        {"name": "深胡桃", "hex": "#604536", "role": "wood", "ratio": 0.20},
+        {"name": "黑色", "hex": "#242424", "role": "contrast", "ratio": 0.10},
+        {"name": "黄铜", "hex": "#A98249", "role": "small_metal_accent", "ratio": 0.07}
+      ],
+      "materials": ["dark_wood", "matte_stone_small_amount", "leather", "brass_small_amount", "dense_woven_rug"],
+      "furniture_language": ["stable_proportions", "actual_room_scale", "refined_lines", "limited_statement_pieces"],
+      "soft_furnishing": ["full_height_curtains", "large_low_contrast_rug", "leather_accent_optional", "generic_abstract_art_optional", "sculptural_lighting"],
+      "decoration_density": "medium_low",
+      "generation_instructions": [
+        "Use refined warm-gray layers with dark wood and only small brass accents.",
+        "Do not convert an ordinary room into an unrealistically large luxury apartment.",
+        "Scale every item to the room in the user image."
+      ],
+      "avoid": ["excessive_gold", "high_gloss_marble_everywhere", "oversized_lobby_furniture", "changing_ceiling_structure_without_permission", "hotel_lobby_feel"]
+    },
+    {
+      "recipe_id": "compact_rental_friendly_v1",
+      "name": "小户型可逆软装约束",
+      "recipe_type": "constraint_recipe",
+      "status": "curated_v1",
+      "evidence_note": "租房、无施工与可逆性必须来自用户输入，不能从成品照推断。",
+      "suitable_room_types": ["living_room", "bedroom", "dining_room", "study"],
+      "palette": [
+        {"name": "暖白", "hex": "#F2EFEA", "role": "background", "ratio": 0.50},
+        {"name": "中浅木", "hex": "#BE9A70", "role": "portable_furniture", "ratio": 0.22},
+        {"name": "暖灰", "hex": "#AAA29A", "role": "textile", "ratio": 0.18},
+        {"name": "单一活力色", "hex": "#C47A38", "role": "replaceable_accent", "ratio": 0.10}
+      ],
+      "materials": ["washable_fabric", "flat_weave_rug", "light_wood", "powder_coated_metal", "freestanding_storage"],
+      "furniture_language": ["compact_scale", "movable", "multifunctional", "visible_floor", "no_built_in_dependency"],
+      "soft_furnishing": ["portable_curtain_solution", "flat_weave_rug", "washable_cushion_covers", "leaning_art_or_no_drill_decoration", "small_plants"],
+      "decoration_density": "low",
+      "generation_instructions": [
+        "Do not change walls, flooring, doors, windows or built-in systems.",
+        "Keep existing large furniture unless replacement is explicitly allowed.",
+        "Use plug-in lighting, movable furniture and no-drill decoration.",
+        "Prioritize curtains, rug, lighting and washable textiles."
+      ],
+      "avoid": ["custom_built_ins", "hardwired_wall_lights", "floor_replacement", "wall_demolition", "drilling_without_permission", "oversized_furniture", "claiming_unverified_budget"]
+    }
+  ]
+}

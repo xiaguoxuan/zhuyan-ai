@@ -1,0 +1,130 @@
+{
+  "name": "zhuyan-ai-desktop",
+  "version": "0.10.4",
+  "private": true,
+  "description": "Secure local-first AI interior furnishing desktop workspace powered by Pi",
+  "author": "xiaguoxuan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xiaguoxuan/zhuyan-ai.git",
+    "directory": "zhuyan-ai-desktop"
+  },
+  "bugs": {
+    "url": "https://github.com/xiaguoxuan/zhuyan-ai/issues"
+  },
+  "homepage": "https://github.com/xiaguoxuan/zhuyan-ai#readme",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "type": "module",
+  "main": "dist-electron/electron/main.js",
+  "scripts": {
+    "dev": "npm run build:electron && concurrently -k --success first \"vite\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "build:renderer": "vite build && node scripts/verify-built-renderer.mjs",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "npm run typecheck && npm run build:renderer && npm run build:electron",
+    "clean:release": "node scripts/clean-release.mjs",
+    "prepare:packaging": "node scripts/prepare-packaging-runtime.mjs",
+    "audit:installer": "node scripts/audit-installer.mjs",
+    "audit:mac:arm64": "node scripts/audit-mac-dmg.mjs",
+    "create:reference-hash-manifest": "node scripts/create-reference-hash-manifest.mjs",
+    "dist:win": "npm run clean:release && npm run build && npm run prepare:packaging && cross-env ZHUYAN_REQUIRE_REFERENCE_LIBRARY=1 electron-builder --win nsis --x64 && cross-env ZHUYAN_REQUIRE_REFERENCE_LIBRARY=1 npm run audit:installer",
+    "dist:mac:arm64": "npm run clean:release && npm run build && npm run prepare:packaging && cross-env ZHUYAN_REQUIRE_REFERENCE_LIBRARY=1 electron-builder --mac dmg --arm64 && cross-env ZHUYAN_REQUIRE_REFERENCE_LIBRARY=1 npm run audit:mac:arm64",
+    "pack:dir": "npm run clean:release && npm run build && npm run prepare:packaging && cross-env ZHUYAN_REQUIRE_REFERENCE_LIBRARY=1 electron-builder --dir --win --x64",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typebox": "1.3.7"
+  },
+  "devDependencies": {
+    "@electron/asar": "3.4.1",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "7zip-bin": "5.2.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
+    "typescript": "5.9.3",
+    "vite": "^6.4.1",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.zhuyan.ai.desktop",
+    "productName": "住颜 AI",
+    "artifactName": "Zhuyan-AI-Setup-${version}.${ext}",
+    "asar": true,
+    "asarUnpack": [
+      "packaging/runtime/**"
+    ],
+    "npmRebuild": false,
+    "afterPack": "scripts/after-pack-audit.cjs",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**",
+      "dist-renderer/**",
+      "packaging/runtime/**",
+      "package.json",
+      "node_modules/**",
+      "!**/*.map",
+      "!**/.env",
+      "!**/.env.*",
+      "!**/auth.json",
+      "!**/models.json",
+      "!**/provider-settings.json",
+      "!**/project.json",
+      "!**/tool-runs.jsonl",
+      "!**/{analysis,workspace,.pi-agent,release}/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "executableName": "ZhuyanAI",
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "Zhuyan-AI-${version}-mac-${arch}.${ext}",
+      "category": "public.app-category.graphics-design",
+      "minimumSystemVersion": "11.0",
+      "identity": null,
+      "notarize": false
+    },
+    "dmg": {
+      "sign": false,
+      "writeUpdateInfo": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "住颜 AI",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

@@ -1,0 +1,53 @@
+# Dependencies
+**/node_modules/
+
+# Build outputs and installers
+**/dist-renderer/
+**/dist-electron/
+**/packaging/
+**/release/
+**/release-archive/
+mac-arm64-build-kit/
+*.exe
+*.dmg
+*.app
+*.asar
+
+# Local runtime state and user projects
+.pi-agent/
+workspace/
+**/workspace/
+**/zhuyan-ai-projects/
+**/provider-settings.json
+**/auth.json
+**/models.json
+**/project.json
+**/tool-runs.jsonl
+
+# Private audit inputs, reference media and generated analyses
+**/private-audit-input/
+analysis/
+img/
+reference-library-sha256.json
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+
+# Logs, caches and OS/editor files
+*.log
+*.tmp.json
+.smoke-user-data/
+coverage/
+.cache/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
