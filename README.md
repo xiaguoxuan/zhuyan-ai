@@ -4,6 +4,10 @@ Zhuyan AI is a secure AI-powered interior furnishing desktop app. Upload a room 
 
 ## Visual demo
 
+[Watch the Zhuyan AI walkthrough on Bilibili (Chinese)](https://www.bilibili.com/video/BV1t7Hv6PEVG/): upload a room photo, generate furnishing concepts, and find furniture from an image.
+
+> The video shows features under development. The latest public release is still `v0.10.4`; some demonstrated features may not be available in that release. Check the [Releases page](https://github.com/xiaguoxuan/zhuyan-ai/releases) for the current published version.
+
 | Original room | AI visualization — warm white and natural wood |
 | --- | --- |
 | ![User-authorized original living room](docs/images/demo-living-room-original.webp) | ![AI-generated warm white and natural wood furnishing visualization](docs/images/demo-living-room-warm-white.webp) |
