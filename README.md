@@ -22,8 +22,8 @@ This example uses a user-authorized room photograph. The AI visualization applie
 
 ## Repository layout
 
-- `zhuyan-ai-desktop/` — Electron, React, TypeScript and Vite desktop application (`0.10.4`).
-- `pi-soft-furnish-agent/` — restricted Pi business runtime and soft-furnishing tools (`0.8.2`).
+- `zhuyan-ai-desktop/` — Electron, React, TypeScript and Vite desktop application (`0.11.0`).
+- `pi-soft-furnish-agent/` — restricted Pi business runtime and soft-furnishing tools (`0.9.0`).
 - `scripts/` — portable Windows and macOS internal build helpers.
 
 ## Development
@@ -62,7 +62,7 @@ Please report suspected vulnerabilities privately as described in [SECURITY.md](
 
 Release builds require a private rights-restricted reference image root or an approved hash-only manifest through environment variables. Private reference libraries, user projects, provider credentials, audit inputs, unapproved generated images and installers are excluded from Git. Only explicitly authorized, metadata-sanitized demonstration media may be tracked under `docs/images/`.
 
-The current source version is Desktop `0.10.4` with Pi Soft Furnish Runtime `0.8.2`. Existing Windows and macOS packages are internal test builds, not public download releases. Public binary distribution still requires production icons, trusted code signing, Apple notarization where applicable, and clean-machine acceptance testing.
+The current source baseline is Desktop `0.11.0` with Pi Soft Furnish Runtime `0.9.0`. This baseline adds four-grid concept selection and recovery, standalone multi-item photo furniture shopping, progress feedback for visual analysis, and the first rental/landlord-oriented product roadmap. Existing Windows and macOS packages are internal test builds, not public download releases. Public binary distribution still requires production icons, trusted code signing, Apple notarization where applicable, and clean-machine acceptance testing.
 
 See [`zhuyan-ai-desktop/README.md`](zhuyan-ai-desktop/README.md), [`pi-soft-furnish-agent/README.md`](pi-soft-furnish-agent/README.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md) and [MEDIA-LICENSE.md](MEDIA-LICENSE.md) for architecture, usage and project policies.
 

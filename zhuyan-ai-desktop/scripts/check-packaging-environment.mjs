@@ -8,7 +8,7 @@ if (major < 22 || (major === 22 && minor < 19)) {
   throw new Error(`Node.js ${process.versions.node} is too old; Zhuyan packaging requires Node.js >= 22.19.0`);
 }
 const packageJson = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
-if (packageJson.version !== "0.10.4") throw new Error(`Unexpected Desktop version: ${packageJson.version}`);
+if (packageJson.version !== "0.11.0") throw new Error(`Unexpected Desktop version: ${packageJson.version}`);
 for (const relative of [
   "electron/main.ts",
   "electron/pi-runtime.ts",

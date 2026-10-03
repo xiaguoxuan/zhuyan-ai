@@ -13,13 +13,16 @@ const releaseDir = path.join(projectRoot, "release");
 const auditDir = path.join(releaseDir, "audit");
 
 if (process.platform !== "darwin") throw new Error("Final DMG audit must run on macOS");
-if (process.arch !== "arm64") throw new Error(`Apple Silicon audit host required; current architecture is ${process.arch}`);
+const expectedArchitecture = process.env.ZHUYAN_MAC_ARCH || process.arch;
+if (!new Set(["arm64", "x64"]).has(expectedArchitecture)) throw new Error(`Unsupported macOS audit architecture: ${expectedArchitecture}`);
+if (process.arch !== expectedArchitecture) throw new Error(`macOS audit host architecture mismatch; expected=${expectedArchitecture}, current=${process.arch}`);
 
 async function findDmg() {
+  const suffix = `mac-${expectedArchitecture}.dmg`;
   const candidates = (await readdir(releaseDir, { withFileTypes: true }))
-    .filter((entry) => entry.isFile() && /mac-arm64\.dmg$/i.test(entry.name))
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(suffix))
     .map((entry) => path.join(releaseDir, entry.name));
-  if (candidates.length !== 1) throw new Error(`Expected exactly one arm64 DMG, found ${candidates.length}`);
+  if (candidates.length !== 1) throw new Error(`Expected exactly one ${expectedArchitecture} DMG, found ${candidates.length}`);
   return candidates[0];
 }
 
@@ -57,10 +60,10 @@ async function auditMachOArchitectures(appPath) {
     if (!await hasMachOMagic(file.absolute).catch(() => false)) continue;
     const architectures = (await execFileAsync("/usr/bin/lipo", ["-archs", file.absolute], { maxBuffer: 2 * 1024 * 1024 })).stdout.trim().split(/\s+/);
     machOCount += 1;
-    if (!architectures.includes("arm64")) invalid.push(file.relative);
+    if (!architectures.includes(expectedArchitecture)) invalid.push(file.relative);
   }
   if (machOCount < 1) throw new Error("No Mach-O executable was found in the mounted app");
-  if (invalid.length > 0) throw new Error(`Non-arm64 Mach-O files found: ${invalid.join(", ")}`);
+  if (invalid.length > 0) throw new Error(`Mach-O files missing ${expectedArchitecture}: ${invalid.join(", ")}`);
   return { machOCount, invalidArchitectureCount: 0 };
 }
 
@@ -78,7 +81,7 @@ try {
   if (!await exists(appAsar)) throw new Error("Mounted app does not contain Contents/Resources/app.asar");
 
   await mkdir(auditDir, { recursive: true });
-  const appReport = await auditAsar(appAsar, path.join(auditDir, "mac-dmg-app-audit.json"), "final macOS arm64 DMG app.asar");
+  const appReport = await auditAsar(appAsar, path.join(auditDir, "mac-dmg-app-audit.json"), `final macOS ${expectedArchitecture} DMG app.asar`);
   const looseImageReport = await auditLooseImagesAgainstReferences(path.join(appPath, "Contents"));
   const architecture = await auditMachOArchitectures(appPath);
   const codeSignVerify = await execFileAsync("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath], { maxBuffer: 10 * 1024 * 1024 })
@@ -93,7 +96,7 @@ try {
     schemaVersion: 1,
     status: "passed",
     auditedAt: new Date().toISOString(),
-    artifact: { fileName: path.basename(dmg), sha256: await sha256File(dmg), platform: "darwin", architecture: "arm64" },
+    artifact: { fileName: path.basename(dmg), sha256: await sha256File(dmg), platform: "darwin", architecture: expectedArchitecture },
     embeddedAppAsarSha256: appReport.appAsar.sha256,
     packagedImageCount: appReport.packagedImages.count,
     appBundleLooseImageCount: looseImageReport.imageCount,
@@ -107,7 +110,7 @@ try {
   console.log("ZHUYAN_MAC_DMG_AUDIT_OK");
   console.log(`DMG: ${report.artifact.fileName}`);
   console.log(`DMG_SHA256: ${report.artifact.sha256}`);
-  console.log("ARCHITECTURE: arm64");
+  console.log(`ARCHITECTURE: ${expectedArchitecture}`);
   console.log(`MACH_O_FILES: ${architecture.machOCount}`);
   console.log(`PACKAGED_IMAGES_IN_APP_ASAR: ${report.packagedImageCount}`);
   console.log(`LOOSE_IMAGES_IN_APP_BUNDLE: ${report.appBundleLooseImageCount}`);

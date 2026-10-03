@@ -11,10 +11,13 @@
 - `list_design_projects`：读取最近项目及最新成功版本摘要；
 - `get_design_project`：读取项目原图工作副本和不可覆盖的版本历史；
 - `manage_design_project`：安全重命名、归档或恢复项目，不移动或删除项目文件；
+- `extract_photo_furnishing_items`：从一张已确认有权使用的任意照片中识别多件家具软装，创建独立购物清单；
+- `list_photo_furnishing_lists` / `get_photo_furnishing_list` / `save_photo_furnishing_list` / `abandon_photo_furnishing_list`：管理独立图片家具清单；
 - `extract_furnishing_items`：对比 Original 和成功效果图，生成按版本隔离的通用家具软装购物清单；
 - `get_furnishing_list`：读取一个成功版本已保存的购物清单，不调用视觉模型；
 - `save_furnishing_list`：保存用户编辑、采用状态与购买状态，使用修订号防止并发覆盖；
 - `retry_room_design`：重试失败或中断版本，并创建新的不可覆盖版本；
+- `generate_layout_concept`：一次生成一张无文字 2×2 布局概念图，独立保存且不占用 V1/V2；
 - `redesign_room`：基于用户房间图创建 V1/V2 等不可覆盖的设计版本；
 - `revise_room_design`：基于成功版本继续修改并创建新版本。
 
@@ -34,9 +37,10 @@ Input fidelity = high
 PI_SOFT_FURNISH_PROVIDER
 PI_SOFT_FURNISH_MODEL
 PI_SOFT_FURNISH_WORKSPACE
+PI_SOFT_FURNISH_CONCEPT_WORKSPACE
 ```
 
-住颜 AI Desktop `0.10.4` 不依赖上述默认 Provider：Main 会从系统加密保存的 BYOK 设置中读取服务地址与凭据，动态注册内部 Provider，并在每次视觉分析和图片生成工具调用中显式传入当前 Provider / 模型。当前 Package 版本为 `0.8.2`，工具 Schema 和项目持久化格式保持兼容。
+住颜 AI Desktop `0.11.0` 不依赖上述默认 Provider：Main 会从系统加密保存的 BYOK 设置中读取服务地址与凭据，动态注册内部 Provider，并在每次视觉分析和图片生成工具调用中显式传入当前 Provider / 模型。当前 Package 版本为 `0.9.0`；正式项目版本格式继续兼容，Concept 使用独立目录。
 
 ## 视觉分析超时与图片输入
 
@@ -74,6 +78,44 @@ workspace/zhuyan-ai-projects/<project-id>/
 - `project.json` 使用文件变更队列和原子替换更新；
 - 归档只写入 `archived_at`，不移动、不覆盖、不删除 Original、版本图片或版本元数据；
 - 归档项目恢复前禁止生成、修改和重试，但仍可读取、预览和导出历史版本。
+
+四格 Concept 独立保存，不进入正式版本树：
+
+```text
+workspace/zhuyan-ai-concepts/<concept-id>/
+├─ concept.json
+├─ source.jpg
+├─ reference.png         # 仅整体参考模式；Concept 私有恢复副本
+├─ grid.png
+└─ options/
+   ├─ A.png
+   ├─ B.png
+   ├─ C.png
+   └─ D.png
+```
+
+- 一次图片调用只生成一张 2×2 拼图；
+- A/B/C/D 由 Electron Main 本地切分和 UI 覆盖；
+- 用户选择前不会自动触发正式 V1；
+- 正式生成会重新校验 Concept ID、原图 SHA-256、选中裁剪路径和裁剪图 SHA-256；
+- 成功但尚未创建正式 V1 的 Concept 会保存恢复草稿；应用重启后可继续选择，不再次调用四格图片模型；
+- 恢复时重新注册 Concept 私有的原图/参考图副本，并校验原图、参考图和 A/B/C/D 文件；旧版或不完整 Concept 不会显示为可恢复；
+- 选择 A/B/C/D 会本地持久化；放弃只改变恢复状态，不删除图片；正式 V1 成功后退出待继续列表；
+- Concept 失败、取消或中断不会占用正式版本号。
+
+独立“图片找家具”清单保存于：
+
+```text
+workspace/zhuyan-ai-photo-shopping/<list-id>/
+├─ list.json
+└─ source.jpg/png/webp
+```
+
+- 单张照片一次最多提取 20 项，同款合并数量、异款拆分；
+- 每项使用稳定 `photo-item-*` ID，可编辑、删除、补充、合并、拆分和记录购买状态；
+- 必须先确认图片权利，并在付费视觉分析前再次确认；更换图片不会复用旧识别结果；
+- 排除建筑结构、固定设备、人物、宠物、Logo、文字和包装，不承诺品牌、型号、价格、精确尺寸或真实同款；
+- 淘宝、京东、1688、拼多多仅使用固定搜索入口，不提供已验证商品详情页。
 
 购物清单按成功版本保存：
 
@@ -165,7 +207,7 @@ completed
 - 返回结果和错误会脱敏常见 API Key/Bearer Token；
 - Renderer 不应直接调用图片 API；
 - 不承诺像素级、施工级或尺寸级还原；
-- Desktop `0.10.4` BYOK 兼容 HTTP 和 HTTPS Provider；HTTP 不提供链路加密，真实用户图片和凭据仍建议只发送到可信 HTTPS 服务；
+- Desktop `0.11.0` BYOK 兼容 HTTP 和 HTTPS Provider；HTTP 不提供链路加密，真实用户图片和凭据仍建议只发送到可信 HTTPS 服务；
 - BYOK 是公开版本默认方案。
 
 ## 安装

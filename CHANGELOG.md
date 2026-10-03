@@ -2,6 +2,30 @@
 
 All notable source changes are documented in this file.
 
+## [0.11.0] — 2026-06-08
+
+### Product capabilities
+
+- Added one-shot 2×2 layout Concept generation with local A/B/C/D crops and explicit user selection before formal V1 generation.
+- Added restart recovery for successfully generated but not-yet-used Concepts without repeating the Concept model call.
+- Added standalone multi-item photo furniture shopping: upload an authorized room or furniture image, extract up to 20 generic furnishing items, edit the list, merge/split entries, track purchases and open fixed marketplace searches.
+- Added real visual-analysis progress overlay for the standalone photo furniture workflow.
+- Added independent local photo-shopping storage with source-image SHA-256 binding and optimistic revision protection.
+- Added Intel Mac x64 internal build-kit scripts alongside the existing Apple Silicon flow.
+
+### Documentation and planning
+
+- Updated Desktop and Runtime documentation for the `0.11.0` / `0.9.0` baseline.
+- Added the 90-day real-estate OPC roadmap and today's product/commercial validation notes.
+- Documented the current validation stage: single-room value validation focused on rental and landlord furnishing refresh.
+
+### Validation status
+
+- TypeScript, Electron and Renderer production builds pass.
+- Runtime package validation passes.
+- Standalone photo-shopping persistence, stable IDs, revision conflict rejection, abandonment and source-image integrity checks pass in local simulation.
+- This is a source baseline and internal candidate only. No commit, tag, public release, signed installer, notarized macOS package or clean-machine acceptance is implied by the source change alone.
+
 ## [0.10.4] — 2026-09-14
 
 ### Security and maintenance

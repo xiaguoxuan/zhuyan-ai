@@ -13,6 +13,19 @@ export const IPC = {
   cancelShoppingList: "zhuyan:cancel-shopping-list",
   openShoppingSearch: "zhuyan:open-shopping-search",
   copyShoppingKeywords: "zhuyan:copy-shopping-keywords",
+  selectPhotoShoppingImage: "zhuyan:select-photo-shopping-image",
+  analyzePhotoShopping: "zhuyan:analyze-photo-shopping",
+  listPhotoShoppingLists: "zhuyan:list-photo-shopping-lists",
+  getPhotoShoppingList: "zhuyan:get-photo-shopping-list",
+  savePhotoShoppingList: "zhuyan:save-photo-shopping-list",
+  abandonPhotoShoppingList: "zhuyan:abandon-photo-shopping-list",
+  openPhotoShoppingSearch: "zhuyan:open-photo-shopping-search",
+  copyPhotoShoppingKeywords: "zhuyan:copy-photo-shopping-keywords",
+  startConcept: "zhuyan:start-concept",
+  listResumableConcepts: "zhuyan:list-resumable-concepts",
+  resumeConcept: "zhuyan:resume-concept",
+  abandonConcept: "zhuyan:abandon-concept",
+  saveConceptSelection: "zhuyan:save-concept-selection",
   startDesign: "zhuyan:start-design",
   startRevision: "zhuyan:start-revision",
   retryVersion: "zhuyan:retry-version",
@@ -134,11 +147,75 @@ export type FurnishingSetSelection = {
   allowGenericWallArt: boolean;
 };
 
+export type LayoutConceptOptionId = "A" | "B" | "C" | "D";
+
+export type LayoutConceptOption = {
+  id: LayoutConceptOptionId;
+  imageUrl: string;
+};
+
+export type LayoutConcept = {
+  conceptId: string;
+  status: "completed";
+  createdAt: string;
+  sourceImageSha256: string;
+  recipeId: string;
+  styleName: string | null;
+  providerId: string;
+  modelId: string;
+  gridImageUrl: string;
+  options: LayoutConceptOption[];
+};
+
+export type StartConceptInput = DesignConstraints & {
+  sourceImageToken: string;
+  recipeId: string;
+  customStyle?: CustomStyleSelection;
+  furnishingSet?: FurnishingSetSelection;
+  userInstructions?: string;
+  projectId?: string;
+  projectTitle?: string;
+};
+
+export type ResumableConceptSummary = {
+  conceptId: string;
+  createdAt: string;
+  sourceImageName: string;
+  styleName: string | null;
+  projectTitle: string;
+};
+
+export type ResumedConceptDraft = {
+  concept: LayoutConcept;
+  sourceImage: SelectedRoomImage;
+  referenceImage: SelectedRoomImage | null;
+  referenceMode: "style_inspiration" | "furnishing_set";
+  referenceAnalysis: ReferenceStyleAnalysis | null;
+  furnishingSetAnalysis: ReferenceFurnishingSetAnalysis | null;
+  referenceOptions: CustomStyleSelection | null;
+  furnishingSetOptions: Omit<FurnishingSetSelection, "analysisToken" | "referenceImageToken" | "rightsConfirmedForGeneration"> | null;
+  useBasicStyleFallback: boolean;
+  form: {
+    projectTitle: string;
+    projectId: string;
+    recipeId: string;
+    userInstructions: string;
+    keepItems: string[];
+    allowedChanges: string[];
+    forbiddenChanges: string[];
+    rentalFriendly: boolean;
+    allowWallArt: boolean;
+  };
+  selectedConceptOption: LayoutConceptOptionId | null;
+};
+
 export type StartDesignInput = DesignConstraints & {
   sourceImageToken: string;
   recipeId: string;
   customStyle?: CustomStyleSelection;
   furnishingSet?: FurnishingSetSelection;
+  conceptId?: string;
+  conceptOption?: LayoutConceptOptionId;
   projectId?: string;
   projectTitle?: string;
   userInstructions?: string;
@@ -262,6 +339,32 @@ export type ShoppingList = {
   items: ShoppingItem[];
 };
 
+export type PhotoShoppingList = {
+  listId: string;
+  revision: number;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  generatedAt: string;
+  providerId: string;
+  modelId: string;
+  sourceImageName: string;
+  sourceImageSha256: string;
+  sourceImageUrl: string;
+  summary: string;
+  disclaimer: string;
+  items: ShoppingItem[];
+};
+
+export type PhotoShoppingSummary = {
+  listId: string;
+  title: string;
+  updatedAt: string;
+  sourceImageUrl: string;
+  itemCount: number;
+  purchasedCount: number;
+};
+
 export type ShoppingSearchPlatform = "taobao" | "jd" | "1688" | "pdd";
 
 export type ShoppingSearchMode = "precise" | "broad" | "material";
@@ -331,12 +434,14 @@ export type ReferenceAnalysisEvent = {
 
 export type RunEvent = {
   runId: string;
+  operation?: "concept" | "design" | "revision" | "retry";
   type: "started" | "progress" | "cancelling" | "completed" | "failed" | "cancelled";
   stage?: string;
   message?: string;
   projectId?: string;
   versionId?: string;
   project?: DesignProject;
+  concept?: LayoutConcept;
 };
 
 export type ZhuyanDesktopApi = {
@@ -354,6 +459,19 @@ export type ZhuyanDesktopApi = {
   cancelShoppingList(): Promise<boolean>;
   openShoppingSearch(projectId: string, versionId: string, itemId: string, platform: ShoppingSearchPlatform, mode: ShoppingSearchMode): Promise<ShoppingSearchResult>;
   copyShoppingKeywords(projectId: string, versionId: string, itemId: string, mode: ShoppingSearchMode): Promise<ShoppingKeywordsResult>;
+  selectPhotoShoppingImage(): Promise<SelectedRoomImage | null>;
+  analyzePhotoShopping(imageToken: string, rightsConfirmed: boolean, title?: string): Promise<PhotoShoppingList>;
+  listPhotoShoppingLists(): Promise<PhotoShoppingSummary[]>;
+  getPhotoShoppingList(listId: string): Promise<PhotoShoppingList>;
+  savePhotoShoppingList(list: PhotoShoppingList): Promise<PhotoShoppingList>;
+  abandonPhotoShoppingList(listId: string): Promise<boolean>;
+  openPhotoShoppingSearch(listId: string, itemId: string, platform: ShoppingSearchPlatform, mode: ShoppingSearchMode): Promise<ShoppingSearchResult>;
+  copyPhotoShoppingKeywords(listId: string, itemId: string, mode: ShoppingSearchMode): Promise<ShoppingKeywordsResult>;
+  startConcept(input: StartConceptInput): Promise<{ runId: string }>;
+  listResumableConcepts(): Promise<ResumableConceptSummary[]>;
+  resumeConcept(conceptId: string): Promise<ResumedConceptDraft>;
+  abandonConcept(conceptId: string): Promise<boolean>;
+  saveConceptSelection(conceptId: string, option: LayoutConceptOptionId | null): Promise<boolean>;
   startDesign(input: StartDesignInput): Promise<{ runId: string }>;
   startRevision(input: StartRevisionInput): Promise<{ runId: string }>;
   retryVersion(projectId: string, failedVersionId: string): Promise<{ runId: string }>;

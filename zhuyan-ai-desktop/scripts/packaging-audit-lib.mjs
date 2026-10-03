@@ -9,13 +9,13 @@ const { extractAll } = require("@electron/asar");
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".jfif", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic", ".heif", ".avif", ".svg", ".ico", ".icns"]);
 const TEXT_EXTENSIONS = new Set([".js", ".cjs", ".mjs", ".ts", ".json", ".html", ".css", ".md", ".txt", ".yml", ".yaml"]);
-const APP_TOP_LEVEL_ALLOWLIST = new Set(["dist-electron", "dist-renderer", "node_modules", "package.json", "packaging"]);
+const APP_TOP_LEVEL_ALLOWLIST = new Set(["assets", "dist-electron", "dist-renderer", "node_modules", "package.json", "packaging"]);
 const RUNTIME_ALLOWLIST = new Set([
   "packaging/runtime/pi-soft-furnish-agent/extensions/soft-furnish.ts",
   "packaging/runtime/pi-soft-furnish-agent/data/style-recipes.json",
   "packaging/runtime/runtime-manifest.json",
 ]);
-const APP_OWNED_PREFIXES = ["dist-electron/", "dist-renderer/", "packaging/"];
+const APP_OWNED_PREFIXES = ["assets/", "dist-electron/", "dist-renderer/", "packaging/"];
 const FORBIDDEN_APP_PATH_NAMES = new Set([
   ".env", "auth.json", "models.json", "provider-settings.json", "project.json", "tool-runs.jsonl",
 ]);
