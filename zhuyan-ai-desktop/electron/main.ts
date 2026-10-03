@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { copyFile, readFile, realpath } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFile, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, safeStorage, shell } from "electron";
-import { IPC, type CustomStyleSelection, type DesignProject, type DownloadVersionResult, type FurnishingSetSelection, type ProjectSummary, type ProviderConnectionTestInput, type ProviderSettingsInput, type ProviderSettingsView, type ReferenceAnalysisEvent, type ReferenceFurnishingItem, type ReferenceFurnishingSetAnalysis, type ReferenceStyleAnalysis, type ReferenceStyleItem, type RunEvent, type ShoppingItem, type ShoppingKeywordsResult, type ShoppingList, type ShoppingListEvent, type ShoppingSearchMode, type ShoppingSearchPlatform, type ShoppingSearchResult, type StartDesignInput, type StartRevisionInput } from "../shared/contracts.js";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, protocol, safeStorage, shell } from "electron";
+import { IPC, type CustomStyleSelection, type DesignProject, type DownloadVersionResult, type FurnishingSetSelection, type LayoutConcept, type LayoutConceptOptionId, type PhotoShoppingList, type PhotoShoppingSummary, type ProjectSummary, type ProviderConnectionTestInput, type ProviderSettingsInput, type ProviderSettingsView, type ReferenceAnalysisEvent, type ReferenceFurnishingItem, type ReferenceFurnishingSetAnalysis, type ReferenceStyleAnalysis, type ReferenceStyleItem, type ResumableConceptSummary, type ResumedConceptDraft, type RunEvent, type ShoppingItem, type ShoppingKeywordsResult, type ShoppingList, type ShoppingListEvent, type ShoppingSearchMode, type ShoppingSearchPlatform, type ShoppingSearchResult, type StartConceptInput, type StartDesignInput, type StartRevisionInput } from "../shared/contracts.js";
 import { PiBusinessRuntime } from "./pi-runtime.js";
 import { ProviderSettingsStore, testProviderConnection, type ProviderRuntimeSettings } from "./provider-settings.js";
 
@@ -34,6 +34,7 @@ let providerTestController: AbortController | null = null;
 const activeRuns = new Map<string, AbortController>();
 const selectedRoomImages = new Map<string, string>();
 const selectedReferenceImages = new Map<string, string>();
+const selectedPhotoShoppingImages = new Map<string, string>();
 const referenceAnalyses = new Map<string, {
   kind: "style" | "furnishing_set";
   analysis: Omit<ReferenceStyleAnalysis, "token"> | Omit<ReferenceFurnishingSetAnalysis, "token">;
@@ -52,6 +53,14 @@ function workspaceRoot(): string {
   return app.isPackaged
     ? path.join(app.getPath("userData"), "workspace", "zhuyan-ai-projects")
     : path.join(DEVELOPMENT_PI_CWD, "workspace", "zhuyan-ai-projects");
+}
+
+function photoShoppingWorkspaceRoot(): string {
+  return path.join(path.dirname(workspaceRoot()), "zhuyan-ai-photo-shopping");
+}
+
+function conceptWorkspaceRoot(): string {
+  return path.join(path.dirname(workspaceRoot()), "zhuyan-ai-concepts");
 }
 
 function runtimeLayout(): { cwd: string; agentDir: string; bundledExtensionPath?: string } {
@@ -143,7 +152,7 @@ function assertNoProviderTest(): void {
 function assertProviderSettingsIdle(): void {
   assertRuntimeStable();
   if (runtime?.isBusy()) throw new Error("住颜业务正在读取或更新数据，请等待当前操作完成");
-  if (activeRuns.size > 0) throw new Error("设计任务进行中，不能修改或测试 Provider 设置");
+  if (activeRuns.size > 0) throw new Error("设计或概念任务进行中，不能修改或测试 Provider 设置");
   if (referenceAnalysisController) throw new Error("参考图正在分析，请等待完成或先取消解析");
   if (shoppingListController) throw new Error("购物清单正在分析，请等待完成或先取消");
   if (providerTestController) throw new Error("Provider 连接正在测试，请等待完成");
@@ -281,6 +290,27 @@ function cleanShoppingItem(value: unknown): ShoppingItem {
     purchased: item.purchased === true,
     confidence: item.confidence,
   };
+}
+
+function cleanPhotoShoppingItem(value: unknown): ShoppingItem {
+  if (!value || typeof value !== "object") throw new Error("图片购物清单条目格式错误");
+  const source = value as Partial<ShoppingItem>;
+  const id = cleanText(source.id, "图片购物物品 ID", 30, true)!;
+  if (!/^photo-item-[a-z0-9-]{2,30}$/.test(id)) throw new Error("图片购物清单物品 ID 格式错误");
+  const normalized = cleanShoppingItem({ ...source, id: "shopping-01", action: "add" });
+  return { ...normalized, id, action: "add" };
+}
+
+function validatePhotoShoppingSave(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") throw new Error("图片购物清单格式错误");
+  const list = value as Partial<PhotoShoppingList>;
+  const listId = cleanText(list.listId, "图片购物清单 ID", 80, true)!;
+  if (!/^photo-list-\d{10,}-[a-f0-9]{8}$/.test(listId)) throw new Error("图片购物清单 ID 格式错误");
+  if (!Number.isInteger(list.revision) || Number(list.revision) < 1) throw new Error("图片购物清单修订号无效");
+  if (!Array.isArray(list.items) || list.items.length < 1 || list.items.length > 20) throw new Error("图片购物清单必须包含 1 至 20 项");
+  const items = list.items.map(cleanPhotoShoppingItem);
+  if (new Set(items.map((item) => item.id)).size !== items.length) throw new Error("图片购物清单物品 ID 不能重复");
+  return { listId, expectedRevision: Number(list.revision), title: cleanText(list.title, "清单名称", 120, true), items };
 }
 
 function validateShoppingListSave(value: unknown): Record<string, unknown> {
@@ -453,9 +483,7 @@ function compileFurnishingSet(selection: FurnishingSetSelection): {
   };
 }
 
-function validateDesignInput(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object") throw new Error("设计参数格式错误");
-  const input = value as Partial<StartDesignInput>;
+function validateGenerationSelection(input: Partial<StartDesignInput> | Partial<StartConceptInput>): Record<string, unknown> {
   const sourceImageToken = cleanText(input.sourceImageToken, "房间图片令牌", 100, true)!;
   const sourceImage = selectedRoomImages.get(sourceImageToken);
   if (!sourceImage) throw new Error("房间图片授权已失效，请重新选择照片");
@@ -490,8 +518,6 @@ function validateDesignInput(value: unknown): Record<string, unknown> {
   return {
     sourceImage,
     recipeId,
-    projectId: cleanProjectId(input.projectId),
-    projectTitle: cleanText(input.projectTitle, "项目名称", 120),
     userInstructions: cleanText(input.userInstructions, "补充要求", 4000),
     customStyleInstructions,
     customStyleContext,
@@ -530,6 +556,49 @@ function validateDesignInput(value: unknown): Record<string, unknown> {
     size: "1536x1024",
     quality: "low",
   };
+}
+
+function validateConceptInput(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") throw new Error("概念图参数格式错误");
+  return validateGenerationSelection(value as Partial<StartConceptInput>);
+}
+
+async function validateDesignInput(value: unknown): Promise<Record<string, unknown>> {
+  if (!value || typeof value !== "object") throw new Error("设计参数格式错误");
+  const input = value as Partial<StartDesignInput>;
+  const result: Record<string, unknown> = {
+    ...validateGenerationSelection(input),
+    projectId: cleanProjectId(input.projectId),
+    projectTitle: cleanText(input.projectTitle, "项目名称", 120),
+  };
+  const conceptId = cleanText(input.conceptId, "概念方案 ID", 100);
+  const conceptOption = input.conceptOption;
+  if (Boolean(conceptId) !== Boolean(conceptOption)) throw new Error("正式生成必须同时提供概念方案和 A/B/C/D 选择");
+  if (conceptId && conceptOption) {
+    if (!/^concept-\d{10,}-[a-f0-9]{8}$/.test(conceptId)) throw new Error("概念方案 ID 格式错误");
+    if (!["A", "B", "C", "D"].includes(conceptOption)) throw new Error("概念方案选择必须是 A、B、C 或 D");
+    const conceptDir = path.join(conceptWorkspaceRoot(), conceptId);
+    const manifest = JSON.parse(await readFile(path.join(conceptDir, "concept.json"), "utf8")) as Record<string, unknown>;
+    if (manifest.status !== "completed" || manifest.concept_id !== conceptId) throw new Error("概念方案尚未完成或已失效");
+    const sourceSha256 = createHash("sha256").update(await readFile(result.sourceImage as string)).digest("hex");
+    if (manifest.source_image_sha256 !== sourceSha256) throw new Error("概念方案与当前房间原图不匹配，请重新生成四格方案");
+    const optionPath = await realpath(path.join(conceptDir, "options", `${conceptOption}.png`));
+    const relative = path.relative(conceptDir, optionPath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("概念方案图片路径无效");
+    const optionSha256 = createHash("sha256").update(await readFile(optionPath)).digest("hex");
+    result.visualReferenceImage = optionPath;
+    result.visualReferenceRightsConfirmed = true;
+    result.visualReferenceMode = "layout_concept";
+    result.layoutConceptId = conceptId;
+    result.layoutConceptOption = conceptOption;
+    result.layoutConceptSourceImageSha256 = sourceSha256;
+    result.layoutConceptOptionImageSha256 = optionSha256;
+    result.userInstructions = [
+      typeof result.userInstructions === "string" ? result.userInstructions : "",
+      `The user selected layout option ${conceptOption} from concept ${conceptId}. Use that crop only as layout direction; preserve the first room image as the sole spatial source of truth.`,
+    ].filter(Boolean).join(" ");
+  }
+  return result;
 }
 
 function validateRevisionInput(value: unknown): Record<string, unknown> {
@@ -885,6 +954,90 @@ async function copyShoppingKeywords(projectIdValue: unknown, versionIdValue: unk
   return { mode, keywords };
 }
 
+async function presentPhotoShoppingList(raw: Record<string, unknown>): Promise<PhotoShoppingList> {
+  const { sourceImagePath, ...safe } = raw;
+  return { ...safe, sourceImageUrl: await assets.register(sourceImagePath) } as PhotoShoppingList;
+}
+
+function cleanPhotoListId(value: unknown): string {
+  const id = cleanText(value, "图片购物清单 ID", 80, true)!;
+  if (!/^photo-list-\d{10,}-[a-f0-9]{8}$/.test(id)) throw new Error("图片购物清单 ID 格式错误");
+  return id;
+}
+
+async function analyzePhotoShopping(imageTokenValue: unknown, rightsConfirmed: unknown, titleValue: unknown): Promise<PhotoShoppingList> {
+  assertRuntimeStable();
+  assertNoProviderTest();
+  if (activeRuns.size > 0 || referenceAnalysisController || shoppingListController) throw new Error("已有 AI 任务正在运行");
+  if (rightsConfirmed !== true) throw new Error("请先确认拥有图片或已获得视觉分析使用权");
+  const token = cleanText(imageTokenValue, "图片令牌", 100, true)!;
+  const sourceImage = selectedPhotoShoppingImages.get(token);
+  if (!sourceImage) throw new Error("图片授权已失效，请重新选择照片");
+  const controller = new AbortController();
+  shoppingListController = controller;
+  emitShoppingList({ type: "started", stage: "validating_shopping_list", message: "正在验证图片和使用权……" });
+  try {
+    const provider = activeProvider();
+    const result = await runtime.execute("extract_photo_furnishing_items", { sourceImage, rightsConfirmed: true, title: cleanText(titleValue, "清单名称", 120), provider: provider.providerId, model: provider.visionModel }, controller.signal, (update) => {
+      const progress = progressMessage(update);
+      emitShoppingList({ type: "progress", stage: progress.stage === "analyzing_shopping_list" ? "analyzing_shopping_list" : progress.stage === "shopping_list_completed" ? "shopping_list_completed" : "validating_shopping_list", message: progress.message || "正在识别家具软装……" });
+    });
+    const list = result.details.shoppingList;
+    if (!list || typeof list !== "object") throw new Error("图片购物清单结果格式错误");
+    emitShoppingList({ type: "completed", stage: "shopping_list_completed", message: "图片家具清单已生成并保存在本机。" });
+    return presentPhotoShoppingList(list as Record<string, unknown>);
+  } catch (error) {
+    const cancelled = controller.signal.aborted;
+    const message = cancelled ? "图片找家具分析已取消" : safeError(error);
+    emitShoppingList({ type: cancelled ? "cancelled" : "failed", stage: cancelled ? "cancelled" : "failed", message });
+    throw new Error(message);
+  } finally { if (shoppingListController === controller) shoppingListController = null; }
+}
+
+async function listPhotoShoppingLists(): Promise<PhotoShoppingSummary[]> {
+  assertRuntimeStable();
+  const result = await runtime.execute("list_photo_furnishing_lists", {});
+  const lists = Array.isArray(result.details.lists) ? result.details.lists as Array<Record<string, unknown>> : [];
+  return Promise.all(lists.map(async (item) => {
+    const { sourceImagePath, ...safe } = item;
+    return { ...safe, sourceImageUrl: await assets.register(sourceImagePath) } as PhotoShoppingSummary;
+  }));
+}
+
+async function getPhotoShoppingList(value: unknown): Promise<PhotoShoppingList> {
+  const result = await runtime.execute("get_photo_furnishing_list", { listId: cleanPhotoListId(value) });
+  return presentPhotoShoppingList(result.details.shoppingList as Record<string, unknown>);
+}
+
+async function savePhotoShoppingList(value: unknown): Promise<PhotoShoppingList> {
+  if (activeRuns.size > 0 || referenceAnalysisController || shoppingListController) throw new Error("AI 任务运行期间不能保存图片购物清单");
+  const result = await runtime.execute("save_photo_furnishing_list", validatePhotoShoppingSave(value));
+  return presentPhotoShoppingList(result.details.shoppingList as Record<string, unknown>);
+}
+
+async function photoShoppingSearchItem(listIdValue: unknown, itemIdValue: unknown): Promise<ShoppingItem> {
+  const list = await getPhotoShoppingList(listIdValue);
+  const itemId = cleanText(itemIdValue, "图片购物物品 ID", 30, true)!;
+  const item = list.items.find((candidate) => candidate.id === itemId);
+  if (!item || !item.included) throw new Error("找不到可搜索的图片购物物品");
+  return item;
+}
+
+async function openPhotoShoppingSearch(listId: unknown, itemId: unknown, platformValue: unknown, modeValue: unknown): Promise<ShoppingSearchResult> {
+  const platform = cleanShoppingSearchPlatform(platformValue);
+  const mode = cleanShoppingSearchMode(modeValue);
+  const keywords = buildShoppingKeywords(await photoShoppingSearchItem(listId, itemId), mode);
+  await shell.openExternal(shoppingSearchUrl(platform, keywords).toString(), { activate: true });
+  return { platform, mode, keywords };
+}
+
+async function copyPhotoShoppingKeywords(listId: unknown, itemId: unknown, modeValue: unknown): Promise<ShoppingKeywordsResult> {
+  const mode = cleanShoppingSearchMode(modeValue);
+  const keywords = buildShoppingKeywords(await photoShoppingSearchItem(listId, itemId), mode);
+  clipboard.writeText(keywords);
+  return { mode, keywords };
+}
+
 async function assertBusinessImage(filePath: unknown): Promise<string> {
   if (typeof filePath !== "string") throw new Error("当前版本没有可下载图片");
   const resolvedRoot = await realpath(workspaceRoot());
@@ -947,6 +1100,324 @@ function progressMessage(update: { content?: Array<{ text?: string }>; details?:
   return { stage, message };
 }
 
+async function presentCompletedConcept(details: Record<string, unknown>): Promise<LayoutConcept> {
+  const conceptId = cleanText(details.conceptId, "概念方案 ID", 100, true)!;
+  if (!/^concept-\d{10,}-[a-f0-9]{8}$/.test(conceptId)) throw new Error("概念方案 ID 格式错误");
+  const conceptDir = path.join(conceptWorkspaceRoot(), conceptId);
+  const outputPath = await realpath(cleanText(details.outputPath, "概念拼图路径", 1000, true)!);
+  const relative = path.relative(conceptDir, outputPath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("概念拼图超出独立工作目录");
+  const image = nativeImage.createFromPath(outputPath);
+  if (image.isEmpty()) throw new Error("无法读取四格概念图");
+  const size = image.getSize();
+  if (size.width < 800 || size.height < 600) throw new Error("四格概念图尺寸过小，无法安全切分");
+  const leftWidth = Math.floor(size.width / 2);
+  const rightWidth = size.width - leftWidth;
+  const topHeight = Math.floor(size.height / 2);
+  const bottomHeight = size.height - topHeight;
+  const crops: Array<{ id: LayoutConceptOptionId; x: number; y: number; width: number; height: number }> = [
+    { id: "A", x: 0, y: 0, width: leftWidth, height: topHeight },
+    { id: "B", x: leftWidth, y: 0, width: rightWidth, height: topHeight },
+    { id: "C", x: 0, y: topHeight, width: leftWidth, height: bottomHeight },
+    { id: "D", x: leftWidth, y: topHeight, width: rightWidth, height: bottomHeight },
+  ];
+  const optionsDir = path.join(conceptDir, "options");
+  await mkdir(optionsDir, { recursive: true });
+  const options = [] as LayoutConcept["options"];
+  for (const crop of crops) {
+    const optionPath = path.join(optionsDir, `${crop.id}.png`);
+    await writeFile(optionPath, image.crop(crop).toPNG());
+    options.push({ id: crop.id, imageUrl: await assets.registerSelected(optionPath) });
+  }
+  const manifestPath = path.join(conceptDir, "concept.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  await writeFile(manifestPath, `${JSON.stringify({
+    ...manifest,
+    options: crops.map((crop) => ({ id: crop.id, relative_path: path.posix.join("options", `${crop.id}.png`) })),
+  }, null, 2)}\n`, "utf8");
+  return {
+    conceptId,
+    status: "completed",
+    createdAt: String(manifest.created_at || new Date().toISOString()),
+    sourceImageSha256: String(details.sourceImageSha256 || manifest.source_image_sha256 || ""),
+    recipeId: String(details.recipeId || manifest.recipe_id || ""),
+    styleName: typeof details.styleName === "string" ? details.styleName : typeof manifest.style_name === "string" ? manifest.style_name : null,
+    providerId: String(details.providerId || manifest.provider_id || ""),
+    modelId: String(details.modelId || manifest.model_id || ""),
+    gridImageUrl: await assets.registerSelected(outputPath),
+    options,
+  };
+}
+
+type ConceptRecoverySnapshot = {
+  sourceImagePath: string;
+  sourceImageName: string;
+  referenceImagePath?: string;
+  referenceImageName?: string;
+  referenceImageSha256?: string;
+  analysisProvider?: string;
+  analysisModel?: string;
+  referenceMode: "style_inspiration" | "furnishing_set";
+  referenceAnalysis?: Omit<ReferenceStyleAnalysis, "token">;
+  furnishingSetAnalysis?: Omit<ReferenceFurnishingSetAnalysis, "token">;
+  referenceOptions?: Omit<CustomStyleSelection, "analysisToken">;
+  furnishingSetOptions?: Omit<FurnishingSetSelection, "analysisToken" | "referenceImageToken" | "rightsConfirmedForGeneration">;
+  useBasicStyleFallback: boolean;
+  form: ResumedConceptDraft["form"];
+};
+
+function conceptRecoverySnapshot(input: StartConceptInput): ConceptRecoverySnapshot {
+  const sourceImagePath = selectedRoomImages.get(input.sourceImageToken);
+  if (!sourceImagePath) throw new Error("房间图片授权已失效，请重新选择照片");
+  const form = {
+    projectTitle: cleanText(input.projectTitle, "项目名称", 120) || "",
+    projectId: cleanProjectId(input.projectId) || "",
+    recipeId: cleanText(input.recipeId, "风格配方", 100, true)!,
+    userInstructions: cleanText(input.userInstructions, "补充要求", 4000) || "",
+    keepItems: cleanList(input.keepItems, "保留项"),
+    allowedChanges: cleanList(input.allowedChanges, "允许修改项"),
+    forbiddenChanges: cleanList(input.forbiddenChanges, "禁止项"),
+    rentalFriendly: cleanBoolean(input.rentalFriendly, false),
+    allowWallArt: cleanBoolean(input.allowWallArt, false),
+  };
+  if (input.customStyle) {
+    const stored = referenceAnalyses.get(input.customStyle.analysisToken);
+    if (!stored || stored.kind !== "style") throw new Error("参考风格解析结果已失效，请重新分析");
+    return {
+      sourceImagePath,
+      sourceImageName: path.basename(sourceImagePath),
+      referenceMode: "style_inspiration",
+      referenceImageSha256: stored.referenceImageSha256,
+      analysisProvider: stored.providerId,
+      analysisModel: stored.modelId,
+      referenceAnalysis: stored.analysis as Omit<ReferenceStyleAnalysis, "token">,
+      referenceOptions: {
+        usePalette: input.customStyle.usePalette,
+        useMaterials: input.customStyle.useMaterials,
+        useFurnitureLanguage: input.customStyle.useFurnitureLanguage,
+        useSoftFurnishings: input.customStyle.useSoftFurnishings,
+        useLighting: input.customStyle.useLighting,
+        selectedTransferableElements: [...input.customStyle.selectedTransferableElements],
+      },
+      useBasicStyleFallback: false,
+      form,
+    };
+  }
+  if (input.furnishingSet) {
+    const stored = referenceAnalyses.get(input.furnishingSet.analysisToken);
+    const referenceImagePath = selectedReferenceImages.get(input.furnishingSet.referenceImageToken);
+    if (!stored || stored.kind !== "furnishing_set" || !referenceImagePath) throw new Error("家具软装参考解析结果已失效，请重新分析");
+    return {
+      sourceImagePath,
+      sourceImageName: path.basename(sourceImagePath),
+      referenceImagePath,
+      referenceImageName: path.basename(referenceImagePath),
+      referenceImageSha256: stored.referenceImageSha256,
+      analysisProvider: stored.providerId,
+      analysisModel: stored.modelId,
+      referenceMode: "furnishing_set",
+      furnishingSetAnalysis: stored.analysis as Omit<ReferenceFurnishingSetAnalysis, "token">,
+      furnishingSetOptions: {
+        selectedItems: input.furnishingSet.selectedItems.map((item) => ({ ...item })),
+        keepAirConditioner: input.furnishingSet.keepAirConditioner,
+        keepFloor: input.furnishingSet.keepFloor,
+        keepCeilingArchitecture: input.furnishingSet.keepCeilingArchitecture,
+        replaceCeilingLight: input.furnishingSet.replaceCeilingLight,
+        removeWallSconces: input.furnishingSet.removeWallSconces,
+        allowWallColorChange: input.furnishingSet.allowWallColorChange,
+        allowGenericWallArt: input.furnishingSet.allowGenericWallArt,
+      },
+      useBasicStyleFallback: false,
+      form,
+    };
+  }
+  return { sourceImagePath, sourceImageName: path.basename(sourceImagePath), referenceMode: "furnishing_set", useBasicStyleFallback: true, form };
+}
+
+async function persistConceptRecoveryDraft(concept: LayoutConcept, snapshot: ConceptRecoverySnapshot): Promise<void> {
+  const conceptDir = path.join(conceptWorkspaceRoot(), concept.conceptId);
+  const manifestPath = path.join(conceptDir, "concept.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  let referenceRelativePath: string | undefined;
+  if (snapshot.referenceImagePath) {
+    const extension = path.extname(snapshot.referenceImagePath).toLowerCase();
+    if (!['.jpg', '.jpeg', '.png', '.webp'].includes(extension)) throw new Error("参考图片格式不受支持");
+    referenceRelativePath = `reference${extension}`;
+    await copyFile(snapshot.referenceImagePath, path.join(conceptDir, referenceRelativePath));
+  }
+  const recoveryDraft = {
+    schema_version: 1,
+    source_image_name: snapshot.sourceImageName,
+    reference_mode: snapshot.referenceMode,
+    reference_relative_path: referenceRelativePath,
+    reference_image_name: snapshot.referenceImageName,
+    reference_image_sha256: snapshot.referenceImageSha256,
+    analysis_provider: snapshot.analysisProvider,
+    analysis_model: snapshot.analysisModel,
+    reference_analysis: snapshot.referenceAnalysis,
+    furnishing_set_analysis: snapshot.furnishingSetAnalysis,
+    reference_options: snapshot.referenceOptions,
+    furnishing_set_options: snapshot.furnishingSetOptions,
+    use_basic_style_fallback: snapshot.useBasicStyleFallback,
+    form: snapshot.form,
+  };
+  await writeFile(manifestPath, `${JSON.stringify({ ...manifest, recovery_state: "available", selected_option: null, recovery_draft: recoveryDraft }, null, 2)}\n`, "utf8");
+}
+
+async function readRecoverableConcept(conceptIdValue: unknown): Promise<{ concept: LayoutConcept; manifest: Record<string, unknown>; conceptDir: string }> {
+  const conceptId = cleanText(conceptIdValue, "概念方案 ID", 100, true)!;
+  if (!/^concept-\d{10,}-[a-f0-9]{8}$/.test(conceptId)) throw new Error("概念方案 ID 格式错误");
+  const conceptDir = path.join(conceptWorkspaceRoot(), conceptId);
+  const manifestPath = path.join(conceptDir, "concept.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  if (manifest.concept_id !== conceptId || manifest.status !== "completed" || manifest.recovery_state !== "available" || !manifest.recovery_draft) {
+    throw new Error("该四格方案不可恢复或已完成后续设计");
+  }
+  const sourceRelativePath = cleanText(manifest.source_relative_path, "概念原图路径", 200, true)!;
+  const gridRelativePath = cleanText(manifest.grid_relative_path, "概念拼图路径", 200, true)!;
+  const sourcePath = await realpath(path.join(conceptDir, sourceRelativePath));
+  const gridPath = await realpath(path.join(conceptDir, gridRelativePath));
+  for (const candidate of [sourcePath, gridPath]) {
+    const relative = path.relative(conceptDir, candidate);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("四格恢复文件路径无效");
+  }
+  const sourceSha256 = createHash("sha256").update(await readFile(sourcePath)).digest("hex");
+  if (sourceSha256 !== manifest.source_image_sha256) throw new Error("四格恢复原图校验失败");
+  const options = [] as LayoutConcept["options"];
+  for (const id of ["A", "B", "C", "D"] as LayoutConceptOptionId[]) {
+    const optionPath = await realpath(path.join(conceptDir, "options", `${id}.png`));
+    const relative = path.relative(conceptDir, optionPath);
+    if (relative.startsWith("..") || path.isAbsolute(relative) || nativeImage.createFromPath(optionPath).isEmpty()) throw new Error(`四格方案 ${id} 文件无效`);
+    options.push({ id, imageUrl: await assets.registerSelected(optionPath) });
+  }
+  return {
+    manifest,
+    conceptDir,
+    concept: {
+      conceptId,
+      status: "completed",
+      createdAt: String(manifest.created_at || ""),
+      sourceImageSha256: sourceSha256,
+      recipeId: String(manifest.recipe_id || ""),
+      styleName: typeof manifest.style_name === "string" ? manifest.style_name : null,
+      providerId: String(manifest.provider_id || ""),
+      modelId: String(manifest.model_id || ""),
+      gridImageUrl: await assets.registerSelected(gridPath),
+      options,
+    },
+  };
+}
+
+async function listResumableConcepts(): Promise<ResumableConceptSummary[]> {
+  const entries = await readdir(conceptWorkspaceRoot(), { withFileTypes: true }).catch(() => []);
+  const concepts: ResumableConceptSummary[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^concept-\d{10,}-[a-f0-9]{8}$/.test(entry.name)) continue;
+    try {
+      const { concept, manifest } = await readRecoverableConcept(entry.name);
+      const draft = manifest.recovery_draft as Record<string, unknown>;
+      const form = draft.form && typeof draft.form === "object" ? draft.form as Record<string, unknown> : {};
+      concepts.push({
+        conceptId: concept.conceptId,
+        createdAt: concept.createdAt,
+        sourceImageName: typeof draft.source_image_name === "string" ? draft.source_image_name : path.basename(cleanText(manifest.source_relative_path, "概念原图路径", 200, true)!),
+        styleName: concept.styleName,
+        projectTitle: typeof form.projectTitle === "string" ? form.projectTitle : "",
+      });
+    } catch { /* Skip incomplete, old or corrupted concepts. */ }
+  }
+  return concepts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+async function resumeConceptDraft(conceptIdValue: unknown): Promise<ResumedConceptDraft> {
+  const { concept, manifest, conceptDir } = await readRecoverableConcept(conceptIdValue);
+  const draft = manifest.recovery_draft as Record<string, unknown>;
+  const form = draft.form as ResumedConceptDraft["form"];
+  if (!form || !MAIN_RECIPE_IDS.includes(form.recipeId as typeof MAIN_RECIPE_IDS[number])) throw new Error("四格恢复草稿配置无效");
+  const sourcePath = await realpath(path.join(conceptDir, cleanText(manifest.source_relative_path, "概念原图路径", 200, true)!));
+  const sourceToken = randomUUID();
+  selectedRoomImages.set(sourceToken, sourcePath);
+  const sourceImage: ResumedConceptDraft["sourceImage"] = { token: sourceToken, name: typeof draft.source_image_name === "string" ? draft.source_image_name : path.basename(sourcePath), previewUrl: await assets.registerSelected(sourcePath) };
+  let referenceImage: ResumedConceptDraft["referenceImage"] = null;
+  let referenceAnalysis: ReferenceStyleAnalysis | null = null;
+  let furnishingSetAnalysis: ReferenceFurnishingSetAnalysis | null = null;
+  const referenceRelativePath = typeof draft.reference_relative_path === "string" ? draft.reference_relative_path : undefined;
+  let referenceToken: string | undefined;
+  if (referenceRelativePath) {
+    const referencePath = await realpath(path.join(conceptDir, referenceRelativePath));
+    const relative = path.relative(conceptDir, referencePath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("恢复参考图路径无效");
+    referenceToken = randomUUID();
+    selectedReferenceImages.set(referenceToken, referencePath);
+    referenceImage = { token: referenceToken, name: typeof draft.reference_image_name === "string" ? draft.reference_image_name : path.basename(referencePath), previewUrl: await assets.registerSelected(referencePath) };
+  }
+  const analysisToken = randomUUID();
+  const createdAt = Date.now();
+  if (draft.reference_analysis && typeof draft.reference_analysis === "object") {
+    const analysis = draft.reference_analysis as Omit<ReferenceStyleAnalysis, "token">;
+    referenceAnalysis = { ...analysis, token: analysisToken };
+    const referenceImageSha256 = cleanText(draft.reference_image_sha256, "参考图摘要", 64, true)!;
+    if (!/^[a-f0-9]{64}$/.test(referenceImageSha256)) throw new Error("恢复参考风格摘要无效");
+    referenceAnalyses.set(analysisToken, { kind: "style", analysis, referenceImageToken: referenceToken || "", referenceImageSha256, providerId: String(draft.analysis_provider || concept.providerId), modelId: String(draft.analysis_model || concept.modelId), createdAt });
+  }
+  if (draft.furnishing_set_analysis && typeof draft.furnishing_set_analysis === "object" && referenceToken && referenceImage) {
+    const analysis = draft.furnishing_set_analysis as Omit<ReferenceFurnishingSetAnalysis, "token">;
+    const referenceImageSha256 = createHash("sha256").update(await readFile(selectedReferenceImages.get(referenceToken)!)).digest("hex");
+    furnishingSetAnalysis = { ...analysis, token: analysisToken };
+    if (draft.reference_image_sha256 !== referenceImageSha256) throw new Error("恢复参考图片摘要校验失败");
+    referenceAnalyses.set(analysisToken, { kind: "furnishing_set", analysis, referenceImageToken: referenceToken, referenceImageSha256, providerId: String(draft.analysis_provider || concept.providerId), modelId: String(draft.analysis_model || concept.modelId), createdAt });
+  }
+  const selected = manifest.selected_option;
+  return {
+    concept,
+    sourceImage,
+    referenceImage,
+    referenceMode: draft.reference_mode === "style_inspiration" ? "style_inspiration" : "furnishing_set",
+    referenceAnalysis,
+    furnishingSetAnalysis,
+    referenceOptions: draft.reference_options ? { analysisToken, ...(draft.reference_options as Omit<CustomStyleSelection, "analysisToken">) } : null,
+    furnishingSetOptions: draft.furnishing_set_options as ResumedConceptDraft["furnishingSetOptions"] || null,
+    useBasicStyleFallback: draft.use_basic_style_fallback === true,
+    form,
+    selectedConceptOption: ["A", "B", "C", "D"].includes(String(selected)) ? selected as LayoutConceptOptionId : null,
+  };
+}
+
+async function updateConceptRecoveryState(conceptIdValue: unknown, state: "available" | "abandoned" | "completed", selectedOption?: LayoutConceptOptionId | null): Promise<void> {
+  const conceptId = cleanText(conceptIdValue, "概念方案 ID", 100, true)!;
+  if (!/^concept-\d{10,}-[a-f0-9]{8}$/.test(conceptId)) throw new Error("概念方案 ID 格式错误");
+  const manifestPath = path.join(conceptWorkspaceRoot(), conceptId, "concept.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  if (manifest.concept_id !== conceptId || manifest.status !== "completed") throw new Error("四格方案不存在或尚未完成");
+  await writeFile(manifestPath, `${JSON.stringify({ ...manifest, recovery_state: state, selected_option: selectedOption ?? manifest.selected_option ?? null, recovery_updated_at: new Date().toISOString() }, null, 2)}\n`, "utf8");
+}
+
+function startConceptRun(params: Record<string, unknown>, recoverySnapshot: ConceptRecoverySnapshot): { runId: string } {
+  assertRuntimeStable();
+  assertNoProviderTest();
+  if (referenceAnalysisController || shoppingListController || activeRuns.size > 0) throw new Error("已有 AI 任务正在运行，请等待完成或先取消");
+  const runId = randomUUID();
+  const controller = new AbortController();
+  activeRuns.set(runId, controller);
+  emit({ runId, operation: "concept", type: "started", stage: "starting_concept", message: "正在启动四格布局概念任务……" });
+  void runtime.execute("generate_layout_concept", params, controller.signal, (update) => {
+    emit({ runId, operation: "concept", type: "progress", ...progressMessage(update) });
+  }).then(async (result) => {
+    const concept = await presentCompletedConcept(result.details);
+    await persistConceptRecoveryDraft(concept, recoverySnapshot);
+    emit({ runId, operation: "concept", type: "completed", stage: "concept_completed", message: "四格布局方案已准备好", concept });
+  }).catch((error) => {
+    emit({
+      runId,
+      operation: "concept",
+      type: controller.signal.aborted ? "cancelled" : "failed",
+      stage: controller.signal.aborted ? "cancelled" : "failed",
+      message: controller.signal.aborted ? "四格布局生成已取消" : safeError(error),
+    });
+  }).finally(() => activeRuns.delete(runId));
+  return { runId };
+}
+
 function startRun(tool: "redesign_room" | "revise_room_design" | "retry_room_design", params: Record<string, unknown>): { runId: string } {
   assertRuntimeStable();
   assertNoProviderTest();
@@ -958,16 +1429,21 @@ function startRun(tool: "redesign_room" | "revise_room_design" | "retry_room_des
   let runProjectId = typeof params.projectId === "string" ? params.projectId : undefined;
   let runVersionId: string | undefined;
   activeRuns.set(runId, controller);
-  emit({ runId, type: "started", stage: "starting", message: "正在启动住颜 AI 工具……", projectId: runProjectId });
+  const operation = tool === "redesign_room" ? "design" : tool === "revise_room_design" ? "revision" : "retry";
+  emit({ runId, operation, type: "started", stage: "starting", message: "正在启动住颜 AI 工具……", projectId: runProjectId });
   void runtime.execute(tool, params, controller.signal, (update) => {
     if (typeof update.details?.projectId === "string") runProjectId = update.details.projectId;
     if (typeof update.details?.versionId === "string") runVersionId = update.details.versionId;
-    emit({ runId, type: "progress", ...progressMessage(update), projectId: runProjectId, versionId: runVersionId });
+    emit({ runId, operation, type: "progress", ...progressMessage(update), projectId: runProjectId, versionId: runVersionId });
   }).then(async (result) => {
     const projectId = String(result.details.projectId || runProjectId || "");
     const project = await getProject(projectId);
+    if (operation === "design" && typeof params.layoutConceptId === "string") {
+      await updateConceptRecoveryState(params.layoutConceptId, "completed", typeof params.layoutConceptOption === "string" ? params.layoutConceptOption as LayoutConceptOptionId : null).catch(() => {});
+    }
     emit({
       runId,
+      operation,
       type: "completed",
       stage: "completed",
       message: "设计版本已保存",
@@ -980,6 +1456,7 @@ function startRun(tool: "redesign_room" | "revise_room_design" | "retry_room_des
     if (runProjectId) project = await getProject(runProjectId).catch(() => undefined);
     emit({
       runId,
+      operation,
       type: controller.signal.aborted ? "cancelled" : "failed",
       stage: controller.signal.aborted ? "cancelled" : "failed",
       message: controller.signal.aborted ? "生成已取消" : safeError(error),
@@ -1066,6 +1543,29 @@ function registerIpc(): void {
       previewUrl: await assets.registerSelected(filePath),
     };
   });
+  ipcMain.handle(IPC.selectPhotoShoppingImage, async (event) => {
+    assertTrustedSender(event);
+    const result = await dialog.showOpenDialog(mainWindow!, { title: "选择要识别家具软装的照片", properties: ["openFile"], filters: [{ name: "室内或家具照片", extensions: ["jpg", "jpeg", "png", "webp"] }] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = await realpath(result.filePaths[0]);
+    const token = randomUUID();
+    selectedPhotoShoppingImages.set(token, filePath);
+    return { token, name: path.basename(filePath), previewUrl: await assets.registerSelected(filePath) };
+  });
+  ipcMain.handle(IPC.analyzePhotoShopping, async (event, token: unknown, rightsConfirmed: unknown, title: unknown) => {
+    assertTrustedSender(event);
+    return analyzePhotoShopping(token, rightsConfirmed, title);
+  });
+  ipcMain.handle(IPC.listPhotoShoppingLists, async (event) => { assertTrustedSender(event); return listPhotoShoppingLists(); });
+  ipcMain.handle(IPC.getPhotoShoppingList, async (event, listId: unknown) => { assertTrustedSender(event); return getPhotoShoppingList(listId); });
+  ipcMain.handle(IPC.savePhotoShoppingList, async (event, list: unknown) => { assertTrustedSender(event); return savePhotoShoppingList(list); });
+  ipcMain.handle(IPC.abandonPhotoShoppingList, async (event, listId: unknown) => {
+    assertTrustedSender(event);
+    await runtime.execute("abandon_photo_furnishing_list", { listId: cleanPhotoListId(listId) });
+    return true;
+  });
+  ipcMain.handle(IPC.openPhotoShoppingSearch, async (event, listId: unknown, itemId: unknown, platform: unknown, mode: unknown) => { assertTrustedSender(event); return openPhotoShoppingSearch(listId, itemId, platform, mode); });
+  ipcMain.handle(IPC.copyPhotoShoppingKeywords, async (event, listId: unknown, itemId: unknown, mode: unknown) => { assertTrustedSender(event); return copyPhotoShoppingKeywords(listId, itemId, mode); });
   ipcMain.handle(IPC.selectReferenceImage, async (event) => {
     assertTrustedSender(event);
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -1227,9 +1727,36 @@ function registerIpc(): void {
     assertTrustedSender(event);
     return copyShoppingKeywords(projectId, versionId, itemId, mode);
   });
+  ipcMain.handle(IPC.startConcept, async (event, input: unknown) => {
+    assertTrustedSender(event);
+    if (!input || typeof input !== "object") throw new Error("概念图参数格式错误");
+    const typedInput = input as StartConceptInput;
+    const snapshot = conceptRecoverySnapshot(typedInput);
+    return startConceptRun(validateConceptInput(typedInput), snapshot);
+  });
+  ipcMain.handle(IPC.listResumableConcepts, async (event) => {
+    assertTrustedSender(event);
+    return listResumableConcepts();
+  });
+  ipcMain.handle(IPC.resumeConcept, async (event, conceptId: unknown) => {
+    assertTrustedSender(event);
+    if (activeRuns.size > 0 || referenceAnalysisController || shoppingListController) throw new Error("AI 任务运行期间不能恢复四格方案");
+    return resumeConceptDraft(conceptId);
+  });
+  ipcMain.handle(IPC.abandonConcept, async (event, conceptId: unknown) => {
+    assertTrustedSender(event);
+    await updateConceptRecoveryState(conceptId, "abandoned");
+    return true;
+  });
+  ipcMain.handle(IPC.saveConceptSelection, async (event, conceptId: unknown, option: unknown) => {
+    assertTrustedSender(event);
+    if (option !== null && !["A", "B", "C", "D"].includes(String(option))) throw new Error("概念方案选择必须是 A、B、C、D 或空");
+    await updateConceptRecoveryState(conceptId, "available", option as LayoutConceptOptionId | null);
+    return true;
+  });
   ipcMain.handle(IPC.startDesign, async (event, input: unknown) => {
     assertTrustedSender(event);
-    return startRun("redesign_room", validateDesignInput(input));
+    return startRun("redesign_room", await validateDesignInput(input));
   });
   ipcMain.handle(IPC.startRevision, async (event, input: unknown) => {
     assertTrustedSender(event);
@@ -1255,7 +1782,7 @@ function registerIpc(): void {
     const id = cleanText(runId, "运行 ID", 100, true)!;
     const controller = activeRuns.get(id);
     if (!controller) return false;
-    emit({ runId: id, type: "cancelling", stage: "cancelling", message: "正在取消生成，请稍候……" });
+    emit({ runId: id, type: "cancelling", stage: "cancelling", message: "正在取消当前 AI 任务，请稍候……" });
     controller.abort(new Error("用户取消生成"));
     return true;
   });
@@ -1268,6 +1795,9 @@ function registerIpc(): void {
 async function createWindow(): Promise<void> {
   if (app.isPackaged && process.platform !== "darwin") Menu.setApplicationMenu(null);
   mainWindow = new BrowserWindow({
+    ...(process.platform === "win32" ? {
+      icon: path.join(app.getAppPath(), "assets", "zhuyan-ai.png"),
+    } : {}),
     width: 1440,
     height: 920,
     minWidth: 1120,
@@ -1320,8 +1850,11 @@ app.whenReady().then(async () => {
     return;
   }
   process.env.PI_SOFT_FURNISH_WORKSPACE ||= workspaceRoot();
+  process.env.PI_SOFT_FURNISH_CONCEPT_WORKSPACE ||= conceptWorkspaceRoot();
   process.env.PI_SOFT_FURNISH_RUN_OWNER = RUN_OWNER_ID;
-  assets = new AssetRegistry(workspaceRoot());
+  // Projects, layout concepts, and standalone photo-shopping lists are isolated
+  // sibling directories under the same private business workspace.
+  assets = new AssetRegistry(path.dirname(workspaceRoot()));
   providerStore = new ProviderSettingsStore(app.getPath("userData"));
   try {
     configuredProvider = await providerStore.loadRuntime();

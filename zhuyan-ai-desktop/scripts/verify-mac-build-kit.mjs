@@ -7,8 +7,12 @@ const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const kitRoot = path.resolve(process.argv[2] || defaultRoot);
 const manifestPath = path.join(kitRoot, "build-kit-manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-const expectedDesktopVersion = "0.10.4";
-const expectedRuntimeVersion = "0.8.2";
+const expectedDesktopVersion = "0.11.0";
+const expectedRuntimeVersion = "0.9.0";
+const expectedArchitecture = process.argv[3] || manifest.targetArchitecture;
+if (!new Set(["arm64", "x64"]).has(expectedArchitecture) || manifest.targetArchitecture !== expectedArchitecture) {
+  throw new Error(`Mac build-kit architecture mismatch: expected=${expectedArchitecture || "missing"}, manifest=${manifest.targetArchitecture || "missing"}`);
+}
 if (!manifest || manifest.schemaVersion !== 1 || !Array.isArray(manifest.files)) throw new Error("Invalid Mac build-kit manifest");
 if (manifest.desktopVersion !== expectedDesktopVersion || manifest.runtimeVersion !== expectedRuntimeVersion) {
   throw new Error(`Mac build-kit version mismatch: Desktop=${manifest.desktopVersion || "missing"}, Runtime=${manifest.runtimeVersion || "missing"}`);
@@ -61,5 +65,6 @@ console.log("ZHUYAN_MAC_BUILD_KIT_VERIFIED");
 console.log(`FILES: ${expected.size + 1}`);
 console.log(`DESKTOP_VERSION: ${expectedDesktopVersion}`);
 console.log(`RUNTIME_VERSION: ${expectedRuntimeVersion}`);
+console.log(`TARGET_ARCHITECTURE: ${expectedArchitecture}`);
 console.log("UNEXPECTED_FILES: 0");
 console.log("SHA256_MISMATCHES: 0");

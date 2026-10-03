@@ -1,6 +1,6 @@
 # 住颜 AI Desktop
 
-Electron + React + Vite 的住颜 AI 专用桌面工作台（当前源码版本 `0.10.4`，内置 Pi Soft Furnish Runtime `0.8.2`）。Windows x64 新安装包必须完成构建和三层审计后才可分发；macOS Apple Silicon（arm64）构建与审计流程已准备，仍需在真实 Apple Silicon Mac 上执行和验收。Pi 作为主进程中的业务工具运行时，Renderer 不接触已保存的 Provider API Key、任意文件系统或通用 coding tools。
+Electron + React + Vite 的住颜 AI 专用桌面工作台（当前源码版本 `0.11.0`，内置 Pi Soft Furnish Runtime `0.9.0`）。Windows x64 新安装包必须完成构建和三层审计后才可分发；macOS Apple Silicon（arm64）和 Intel x64 的内部构建流程已准备，仍需在真实 Mac 上执行和验收。Pi 作为主进程中的业务工具运行时，Renderer 不接触已保存的 Provider API Key、任意文件系统或通用 coding tools。
 
 ## 当前纵切面
 
@@ -31,7 +31,7 @@ Electron + React + Vite 的住颜 AI 专用桌面工作台（当前源码版本 
 - 下载只接受 `projectId + versionId`，不接受 Renderer 传入源文件路径；
 - 本地文件选择返回能力令牌，而不是允许 Renderer 任意指定路径；
 - 项目图片通过只读 `zhuyan-asset://` 协议预览；
-- Pi Session 只启用 13 个住颜业务工具（含参考风格解析、项目管理、内部中断恢复和安全重试），不启用 `read/bash/edit/write`；
+- Pi Session 只启用住颜业务工具（当前 19 个，含四格 Concept、参考风格解析、独立图片找家具、项目管理、内部中断恢复和安全重试），不启用 `read/bash/edit/write`；
 - Provider、视觉模型和图片模型由 Main 从受控设置读取，Renderer 不能提交 Provider ID；图片尺寸、质量和 input fidelity 仍由应用锁定；
 - API Key 使用 Electron `safeStorage` 由当前 Windows 用户凭据加密，普通 JSON 只保存服务地址、模型 ID 和加密密文；
 - 若 Windows 安全存储不可用，应用拒绝把 API Key 以明文持久化；
@@ -84,7 +84,7 @@ npm run dev
 app.getPath("userData")\workspace\zhuyan-ai-projects
 ```
 
-## 0.10.4 内部测试安装包与内容审计
+## 0.11.0 内部测试安装包与内容审计
 
 安装打包依赖（首次一次）：
 
@@ -101,7 +101,7 @@ app.getPath("userData")\workspace\zhuyan-ai-projects
 产物：
 
 ```text
-release/Zhuyan-AI-Setup-0.10.4.exe
+release/Zhuyan-AI-Setup-0.11.0.exe
 release/audit/unpacked-app-audit.json
 release/audit/installer-app-audit.json
 release/audit/installer-audit.json
@@ -125,7 +125,7 @@ release/audit/installer-audit.json
 Mac 目标产物：
 
 ```text
-release/Zhuyan-AI-0.10.4-mac-arm64.dmg
+release/Zhuyan-AI-0.11.0-mac-arm64.dmg
 ```
 
 先在 Windows 开发机准备严格白名单构建材料：
@@ -168,7 +168,7 @@ release/audit/mac-dmg-audit.json
 
 Mac 内部测试包采用 ad-hoc 签名，不是 Apple Developer ID 签名，也未通过 Apple Notarization。朋友首次打开时可能被 Gatekeeper 阻止；在确认 DMG 的 SHA-256 与审计输出一致后，可在 Finder 中按住 Control 点击应用并选择“打开”，或在“系统设置 → 隐私与安全性”中选择仍要打开。不要要求测试者关闭全局 Gatekeeper。
 
-## 0.10.4 视觉分析超时策略
+## 0.11.0 视觉分析超时策略
 
 - 参考风格分析最长等待 5 分钟；
 - 家具软装套系分析最长等待 6 分钟；
@@ -176,6 +176,31 @@ Mac 内部测试包采用 ad-hoc 签名，不是 Apple Developer ID 签名，也
 - 图片生成继续保持 10 分钟；
 - 超时后不自动重试，避免 Provider 仍在后台处理时重复提交和计费；
 - 视觉分析直接发送用户选择的 PNG、JPEG 或 WebP 原始字节，不缩放、不重编码、不压缩。
+
+## 0.11.0 新增能力
+
+### 四格 Concept 与恢复
+
+- 单次生成 2×2 Concept，应用本地切分 A/B/C/D；
+- 用户选择前不生成正式 V1；
+- 成功但未完成正式设计的 Concept 可在应用重启后继续使用，不重复调用模型；
+- Concept 独立于正式版本树；
+- 选择状态、原图摘要和裁剪图摘要均保存并校验。
+
+### 独立图片找家具
+
+- 上传任意本地目录中的 JPG、PNG 或 WebP 室内/家具照片；
+- 一次识别多件家具软装，最多 20 项；
+- 支持同款合并、异款拆分、编辑、新增、删除和购买状态；
+- 每项提供置信度、尺寸实测提醒和独立搜索词；
+- 支持淘宝、京东、1688、拼多多固定搜索入口；
+- 分析期间展示真实工具阶段进度，不显示模拟百分比；
+- 独立清单保存于 `workspace/zhuyan-ai-photo-shopping/`，不绑定设计项目；
+- 不承诺品牌、型号、价格、精确尺寸、真实同款或具体商品详情页。
+
+### 产品验证路线
+
+当前处于“单房间价值验证”阶段，优先验证出租房/包租房的低成本软装焕新，并通过真实用户反馈决定是否进入出租房模板化和多房间批量交付阶段。路线记录见 [`docs/zhuyan-ai-90-day-roadmap.md`](../docs/zhuyan-ai-90-day-roadmap.md)。
 
 ## 0.9.1 Provider 设置与 BYOK
 

@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DesignProject,
   DesignVersion,
+  LayoutConcept,
+  LayoutConceptOptionId,
+  PhotoShoppingList,
+  PhotoShoppingSummary,
   ProjectListFilter,
   ProjectSummary,
   ProviderConnectionTestResult,
@@ -9,6 +13,7 @@ import type {
   ProviderSettingsView,
   ReferenceFurnishingSetAnalysis,
   ReferenceStyleAnalysis,
+  ResumableConceptSummary,
   RunEvent,
   SelectedRoomImage,
   ShoppingItem,
@@ -16,6 +21,7 @@ import type {
   ShoppingListEvent,
   ShoppingSearchMode,
   ShoppingSearchPlatform,
+  StartConceptInput,
   StartDesignInput,
 } from "../shared/contracts";
 
@@ -33,6 +39,12 @@ const STAGE_LABELS: Record<string, string> = {
   loading_style_recipe: "读取风格配方",
   building_generation_prompt: "构建设计指令",
   reserving_version: "创建不可覆盖的新版本",
+  starting_concept: "启动四格布局任务",
+  validating_concept_input: "验证房间图片和布局约束",
+  loading_concept_style: "读取概念风格配方",
+  submitting_concept_request: "生成四格布局概念图",
+  saving_concept: "保存并切分四格方案",
+  concept_completed: "四格方案已准备好",
   submitting_generation_request: "生成软装效果图",
   saving_version: "校验并保存图片",
   completed: "设计版本已完成",
@@ -58,7 +70,7 @@ const SHOPPING_SEARCH_PLATFORMS: Array<{ id: ShoppingSearchPlatform; label: stri
   { id: "pdd", label: "拼多多" },
 ];
 
-type Page = "projects" | "new" | "project" | "settings";
+type Page = "projects" | "new" | "project" | "photo-shopping" | "settings";
 
 const EMPTY_PROVIDER_FORM: ProviderSettingsInput = {
   baseUrl: "",
@@ -181,6 +193,19 @@ export default function App() {
   const [providerSaving, setProviderSaving] = useState(false);
   const [providerTesting, setProviderTesting] = useState(false);
   const [providerTestResult, setProviderTestResult] = useState<ProviderConnectionTestResult | null>(null);
+  const [layoutConcept, setLayoutConcept] = useState<LayoutConcept | null>(null);
+  const [selectedConceptOption, setSelectedConceptOption] = useState<LayoutConceptOptionId | null>(null);
+  const [resumableConcepts, setResumableConcepts] = useState<ResumableConceptSummary[]>([]);
+  const [conceptRecoveryLoading, setConceptRecoveryLoading] = useState(false);
+  const preservingRecoveredConcept = useRef(false);
+  const [photoShoppingLists, setPhotoShoppingLists] = useState<PhotoShoppingSummary[]>([]);
+  const [photoShoppingImage, setPhotoShoppingImage] = useState<SelectedRoomImage | null>(null);
+  const [photoShoppingRights, setPhotoShoppingRights] = useState(false);
+  const [photoShoppingList, setPhotoShoppingList] = useState<PhotoShoppingList | null>(null);
+  const [photoShoppingDirty, setPhotoShoppingDirty] = useState(false);
+  const [photoShoppingLoading, setPhotoShoppingLoading] = useState(false);
+  const [photoShoppingAnalyzing, setPhotoShoppingAnalyzing] = useState(false);
+  const [photoShoppingTitle, setPhotoShoppingTitle] = useState("");
 
   const refreshProviderSettings = useCallback(async () => {
     setProviderLoading(true);
@@ -198,6 +223,10 @@ export default function App() {
     } finally {
       setProviderLoading(false);
     }
+  }, []);
+
+  const refreshResumableConcepts = useCallback(async () => {
+    setResumableConcepts(await window.zhuyan.listResumableConcepts());
   }, []);
 
   const refreshProjects = useCallback(async (clearError = true) => {
@@ -230,6 +259,8 @@ export default function App() {
     });
     setReferenceProgress("等待解析");
     setAnalyzingReference(false);
+    setLayoutConcept(null);
+    setSelectedConceptOption(null);
   }, []);
 
   const openNewDesign = useCallback(() => {
@@ -243,6 +274,7 @@ export default function App() {
 
   useEffect(() => { void refreshProjects(); }, [refreshProjects]);
   useEffect(() => { void refreshProviderSettings(); }, [refreshProviderSettings]);
+  useEffect(() => { void refreshResumableConcepts().catch(() => {}); }, [refreshResumableConcepts]);
   useEffect(() => {
     if (page !== "settings") setProviderForm((current) => current.apiKey ? { ...current, apiKey: "" } : current);
   }, [page]);
@@ -263,7 +295,17 @@ export default function App() {
     if (event.type === "failed") setError(event.message || "生成失败，请稍后重试");
     if (event.type === "cancelled") {
       setError(null);
-      setNotice("本次生成已取消；如任务已预留版本，该版本会保留取消状态并可安全重试。");
+      setNotice(event.operation === "concept"
+        ? "本次四格布局生成已取消；不会创建或占用正式版本号。"
+        : "本次生成已取消；如任务已预留版本，该版本会保留取消状态并可安全重试。");
+    }
+    if (event.type === "completed" && event.operation === "concept" && event.concept) {
+      setLayoutConcept(event.concept);
+      setSelectedConceptOption(null);
+      setError(null);
+      setNotice("四格布局已生成。请选择 A、B、C 或 D；选择前不会自动生成正式效果图。");
+      void refreshResumableConcepts().catch(() => {});
+      return;
     }
     if ((event.type === "failed" || event.type === "cancelled") && event.project) {
       setProject(event.project);
@@ -272,7 +314,7 @@ export default function App() {
       setPage("project");
       void refreshProjects(false);
     }
-    if (event.type === "completed" && event.project) {
+    if (event.type === "completed" && event.operation !== "concept" && event.project) {
       const completedVersionId = event.versionId || event.project.latestCompletedVersionId;
       setProject(event.project);
       setSelectedVersionId(completedVersionId || "original");
@@ -284,8 +326,9 @@ export default function App() {
       setNotice(`${completedVersionId?.toUpperCase() || "新版本"} 已生成并保存。`);
       resetNewDesignDraft();
       void refreshProjects();
+      void refreshResumableConcepts().catch(() => {});
     }
-  }), [refreshProjects, resetNewDesignDraft]);
+  }), [refreshProjects, refreshResumableConcepts, resetNewDesignDraft]);
 
   const openProject = async (projectId: string) => {
     setLoading(true);
@@ -307,7 +350,11 @@ export default function App() {
   };
 
   const manageCurrentProject = async (action: "rename" | "archive" | "restore") => {
-    if (!project || activeRun) return;
+    if (!project) return;
+    if (activeRun) {
+      setError(action === "rename" ? "当前 AI 任务结束后才能保存项目名称。" : "当前 AI 任务结束后才能管理项目。");
+      return;
+    }
     if (action === "archive" && shoppingDirty && !window.confirm("购物清单有未保存修改，归档项目会放弃这些修改。确认继续？")) return;
     const title = action === "rename" ? renameTitle.trim() : undefined;
     if (action === "rename" && !title) return setError("项目名称不能为空");
@@ -538,35 +585,143 @@ export default function App() {
     }));
   };
 
+  const generationSelection = (): StartConceptInput => ({
+    sourceImageToken: form.image!.token,
+    recipeId: form.recipeId,
+    projectTitle: form.projectTitle.trim() || undefined,
+    projectId: form.projectId.trim() || undefined,
+    customStyle: referenceAnalysis ? {
+      analysisToken: referenceAnalysis.token,
+      ...referenceOptions,
+    } : undefined,
+    furnishingSet: furnishingSetAnalysis && referenceImage ? {
+      analysisToken: furnishingSetAnalysis.token,
+      referenceImageToken: referenceImage.token,
+      ...furnishingSetOptions,
+      rightsConfirmedForGeneration: true,
+    } : undefined,
+    userInstructions: form.userInstructions.trim() || undefined,
+    keepItems: lines(form.keepItems),
+    allowedChanges: lines(form.allowedChanges),
+    forbiddenChanges: lines(form.forbiddenChanges),
+    rentalFriendly: form.rentalFriendly,
+    allowWallArt: form.allowWallArt,
+  });
+
+  useEffect(() => {
+    if (preservingRecoveredConcept.current) {
+      preservingRecoveredConcept.current = false;
+      return;
+    }
+    setLayoutConcept(null);
+    setSelectedConceptOption(null);
+  }, [
+    form.image?.token,
+    form.recipeId,
+    form.userInstructions,
+    form.keepItems,
+    form.allowedChanges,
+    form.forbiddenChanges,
+    form.rentalFriendly,
+    form.allowWallArt,
+    referenceAnalysis?.token,
+    furnishingSetAnalysis?.token,
+    JSON.stringify(referenceOptions),
+    JSON.stringify(furnishingSetOptions),
+  ]);
+
+  const resumeSavedConcept = async (conceptId: string) => {
+    try {
+      setConceptRecoveryLoading(true);
+      setError(null);
+      const draft = await window.zhuyan.resumeConcept(conceptId);
+      preservingRecoveredConcept.current = true;
+      setForm({
+        image: draft.sourceImage,
+        projectTitle: draft.form.projectTitle,
+        projectId: draft.form.projectId,
+        recipeId: draft.form.recipeId,
+        userInstructions: draft.form.userInstructions,
+        keepItems: draft.form.keepItems.join("\n"),
+        allowedChanges: draft.form.allowedChanges.join("\n"),
+        forbiddenChanges: draft.form.forbiddenChanges.join("\n"),
+        rentalFriendly: draft.form.rentalFriendly,
+        allowWallArt: draft.form.allowWallArt,
+      });
+      setReferenceImage(draft.referenceImage);
+      setReferenceMode(draft.referenceMode);
+      setReferenceAnalysis(draft.referenceAnalysis);
+      setFurnishingSetAnalysis(draft.furnishingSetAnalysis);
+      if (draft.referenceOptions) setReferenceOptions({
+        usePalette: draft.referenceOptions.usePalette,
+        useMaterials: draft.referenceOptions.useMaterials,
+        useFurnitureLanguage: draft.referenceOptions.useFurnitureLanguage,
+        useSoftFurnishings: draft.referenceOptions.useSoftFurnishings,
+        useLighting: draft.referenceOptions.useLighting,
+        selectedTransferableElements: [...draft.referenceOptions.selectedTransferableElements],
+      });
+      if (draft.furnishingSetOptions) setFurnishingSetOptions({ ...draft.furnishingSetOptions, selectedItems: draft.furnishingSetOptions.selectedItems.map((item) => ({ ...item })) });
+      setUseBasicStyleFallback(draft.useBasicStyleFallback);
+      setLayoutConcept(draft.concept);
+      setSelectedConceptOption(draft.selectedConceptOption);
+      setReferenceProgress("已从本机恢复参考分析");
+      setNotice("已恢复此前付费生成成功的四格方案；继续选择不会再次产生四格费用。");
+      setPage("new");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setConceptRecoveryLoading(false);
+    }
+  };
+
+  const abandonSavedConcept = async (conceptId: string) => {
+    if (!window.confirm("放弃后不会删除四格图片，但它将不再出现在待继续列表中。已发生的生成费用不会退回。确认放弃？")) return;
+    try {
+      setConceptRecoveryLoading(true);
+      await window.zhuyan.abandonConcept(conceptId);
+      setResumableConcepts((current) => current.filter((item) => item.conceptId !== conceptId));
+      setNotice("已放弃该四格方案，没有调用模型。");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setConceptRecoveryLoading(false);
+    }
+  };
+
+  const selectConceptOption = (option: LayoutConceptOptionId) => {
+    setSelectedConceptOption(option);
+    if (layoutConcept) void window.zhuyan.saveConceptSelection(layoutConcept.conceptId, option).catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+  };
+
+  const createLayoutConcept = async () => {
+    if (!form.image) return setError("请先选择房间照片");
+    if (!referenceAnalysis && !furnishingSetAnalysis && !useBasicStyleFallback) return setError("请上传并分析参考照片；如果没有参考图，请选择基础风格");
+    if (!window.confirm("生成四格布局会调用一次图片模型并产生一次费用。只生成一张 2×2 概念图，不会创建 V1。确认继续？")) return;
+    try {
+      setError(null);
+      setNotice(null);
+      const { runId } = await window.zhuyan.startConcept(generationSelection());
+      setRun({ runId, operation: "concept", type: "started", stage: "starting_concept", message: "正在启动四格布局概念任务……" });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
   const createDesign = async () => {
     if (!form.image) return setError("请先选择房间照片");
-    if (!referenceAnalysis && !furnishingSetAnalysis && !useBasicStyleFallback) return setError("请上传并分析参考照片；如果没有参考图，请展开“没有参考照片”选择基础风格");
+    if (!layoutConcept || !selectedConceptOption) return setError("请先生成四格布局并选择 A、B、C 或 D");
+    if (!window.confirm(`将使用原房间图和选中的方案 ${selectedConceptOption} 生成正式 V1，会再次调用一次图片模型并产生一次费用。确认继续？`)) return;
     const input: StartDesignInput = {
-      sourceImageToken: form.image.token,
+      ...generationSelection(),
       projectTitle: form.projectTitle.trim() || undefined,
       projectId: form.projectId.trim() || undefined,
-      recipeId: form.recipeId,
-      customStyle: referenceAnalysis ? {
-        analysisToken: referenceAnalysis.token,
-        ...referenceOptions,
-      } : undefined,
-      furnishingSet: furnishingSetAnalysis && referenceImage ? {
-        analysisToken: furnishingSetAnalysis.token,
-        referenceImageToken: referenceImage.token,
-        ...furnishingSetOptions,
-        rightsConfirmedForGeneration: true,
-      } : undefined,
-      userInstructions: form.userInstructions.trim() || undefined,
-      keepItems: lines(form.keepItems),
-      allowedChanges: lines(form.allowedChanges),
-      forbiddenChanges: lines(form.forbiddenChanges),
-      rentalFriendly: form.rentalFriendly,
-      allowWallArt: form.allowWallArt,
+      conceptId: layoutConcept.conceptId,
+      conceptOption: selectedConceptOption,
     };
     try {
       setError(null);
       const { runId } = await window.zhuyan.startDesign(input);
-      setRun({ runId, type: "started", stage: "starting", message: "正在启动住颜 AI 工具……" });
+      setRun({ runId, operation: "design", type: "started", stage: "starting", message: `正在根据方案 ${selectedConceptOption} 启动正式效果图……` });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
@@ -677,6 +832,105 @@ export default function App() {
     }
   };
 
+  const refreshPhotoShoppingLists = async () => {
+    try { setPhotoShoppingLists(await window.zhuyan.listPhotoShoppingLists()); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+  };
+
+  const openPhotoShopping = () => {
+    if (photoShoppingDirty && !window.confirm("图片购物清单有未保存修改，离开会丢失。确认继续？")) return;
+    setPage("photo-shopping");
+    setPhotoShoppingDirty(false);
+    void refreshPhotoShoppingLists();
+  };
+
+  const choosePhotoShoppingImage = async () => {
+    const image = await window.zhuyan.selectPhotoShoppingImage();
+    if (!image) return;
+    if (photoShoppingList && !window.confirm("更换照片会清空当前页面结果，但不会删除已保存的旧清单。确认更换？")) return;
+    setPhotoShoppingImage(image);
+    setPhotoShoppingList(null);
+    setPhotoShoppingRights(false);
+    setPhotoShoppingTitle(image.name.replace(/\.[^.]+$/, ""));
+    setPhotoShoppingDirty(false);
+  };
+
+  const analyzeSelectedPhoto = async () => {
+    if (!photoShoppingImage || !photoShoppingRights) return setError("请选择照片并确认拥有图片或已获得视觉分析使用权");
+    if (!window.confirm("本次会将所选照片发送给当前视觉模型，并产生一次视觉分析费用。分析不会自动重试。确认继续？")) return;
+    try {
+      setPhotoShoppingLoading(true); setPhotoShoppingAnalyzing(true); setError(null); setNotice(null);
+      setShoppingStage("validating_shopping_list");
+      setShoppingProgress("正在验证照片格式、使用权和分析配置……");
+      const list = await window.zhuyan.analyzePhotoShopping(photoShoppingImage.token, true, photoShoppingTitle.trim() || undefined);
+      setPhotoShoppingList(list); setPhotoShoppingDirty(false); setShoppingSearchModes({});
+      await refreshPhotoShoppingLists();
+      setNotice(`已识别并保存 ${list.items.length} 项家具软装。`);
+    } catch (reason) { const message = reason instanceof Error ? reason.message : String(reason); if (!/取消/.test(message)) setError(message); }
+    finally { setPhotoShoppingLoading(false); setPhotoShoppingAnalyzing(false); }
+  };
+
+  const openPhotoShoppingList = async (listId: string) => {
+    if (photoShoppingDirty && !window.confirm("当前修改尚未保存，确认放弃并打开其他清单？")) return;
+    try { setPhotoShoppingLoading(true); const list = await window.zhuyan.getPhotoShoppingList(listId); setPhotoShoppingList(list); setPhotoShoppingImage({ token: "saved", name: list.sourceImageName, previewUrl: list.sourceImageUrl }); setPhotoShoppingTitle(list.title); setPhotoShoppingDirty(false); setShoppingSearchModes({}); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setPhotoShoppingLoading(false); }
+  };
+
+  const updatePhotoShoppingItem = (itemId: string, changes: Partial<ShoppingItem>) => {
+    setPhotoShoppingList((current) => current ? { ...current, items: current.items.map((item) => item.id === itemId ? { ...item, ...changes } : item) } : current);
+    setPhotoShoppingDirty(true);
+  };
+
+  const addPhotoShoppingItem = () => {
+    setPhotoShoppingList((current) => {
+      if (!current || current.items.length >= 20) return current;
+      const id = `photo-item-manual-${Date.now().toString(36)}`.slice(0, 30);
+      return { ...current, items: [...current.items, { id, category: "家具软装", name: "新物品", action: "add", quantity: 1, priority: "medium", color: "", material: "", style: "", sizeGuidance: "购买前请实测摆放位置和动线", searchKeywords: "家具软装", notes: "", included: true, purchased: false, confidence: "low" }] };
+    });
+    setPhotoShoppingDirty(true);
+  };
+
+  const splitPhotoShoppingItem = (item: ShoppingItem) => {
+    if (!photoShoppingList || photoShoppingList.items.length >= 20 || item.quantity < 2) return;
+    const id = `photo-item-split-${Date.now().toString(36)}`.slice(0, 30);
+    setPhotoShoppingList({ ...photoShoppingList, items: photoShoppingList.items.flatMap((candidate) => candidate.id === item.id ? [{ ...candidate, quantity: candidate.quantity - 1 }, { ...candidate, id, quantity: 1, notes: `${candidate.notes}${candidate.notes ? "；" : ""}由 ${candidate.id} 拆分` }] : [candidate]) });
+    setPhotoShoppingDirty(true);
+  };
+
+  const mergePhotoShoppingItem = (item: ShoppingItem) => {
+    if (!photoShoppingList) return;
+    const target = photoShoppingList.items.find((candidate) => candidate.id !== item.id && candidate.category.trim() === item.category.trim());
+    if (!target) return setError("没有找到同类别的另一项；请先把要合并的两项类别改成相同内容");
+    setPhotoShoppingList({ ...photoShoppingList, items: photoShoppingList.items.filter((candidate) => candidate.id !== item.id).map((candidate) => candidate.id === target.id ? { ...candidate, quantity: Math.min(20, candidate.quantity + item.quantity), notes: [candidate.notes, item.notes].filter(Boolean).join("；") } : candidate) });
+    setPhotoShoppingDirty(true);
+  };
+
+  const saveCurrentPhotoShoppingList = async () => {
+    if (!photoShoppingList || !photoShoppingDirty) return;
+    try { setShoppingSaving(true); const saved = await window.zhuyan.savePhotoShoppingList({ ...photoShoppingList, title: photoShoppingTitle.trim() || photoShoppingList.title }); setPhotoShoppingList(saved); setPhotoShoppingTitle(saved.title); setPhotoShoppingDirty(false); await refreshPhotoShoppingLists(); setNotice(`图片购物清单已保存（修订 ${saved.revision}）。`); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setShoppingSaving(false); }
+  };
+
+  const searchPhotoShoppingItem = async (item: ShoppingItem, platform: ShoppingSearchPlatform) => {
+    if (!photoShoppingList || photoShoppingDirty) return setError("请先保存清单，再使用最新字段搜索");
+    try { const mode = shoppingSearchModes[item.id] || "broad"; const result = await window.zhuyan.openPhotoShoppingSearch(photoShoppingList.listId, item.id, platform, mode); setNotice(`已打开搜索：${result.keywords}`); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+  };
+
+  const abandonCurrentPhotoShoppingList = async () => {
+    if (!photoShoppingList || !window.confirm("放弃后该清单不再出现在列表中，但本地原图和清单文件不会删除。确认放弃？")) return;
+    try { await window.zhuyan.abandonPhotoShoppingList(photoShoppingList.listId); setPhotoShoppingList(null); setPhotoShoppingImage(null); setPhotoShoppingTitle(""); setPhotoShoppingDirty(false); await refreshPhotoShoppingLists(); setNotice("已放弃该图片购物清单，没有删除本地文件。"); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+  };
+
+  const copyPhotoKeywords = async (item: ShoppingItem) => {
+    if (!photoShoppingList || photoShoppingDirty) return setError("请先保存清单，再复制最新搜索词");
+    try { const result = await window.zhuyan.copyPhotoShoppingKeywords(photoShoppingList.listId, item.id, shoppingSearchModes[item.id] || "broad"); setNotice(`已复制搜索词：${result.keywords}`); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+  };
+
   const chooseCurrentDesignForShopping = async () => {
     if (!project || !selectedVersion || selectedVersion.status !== "completed" || !selectedVersion.imageUrl) return;
     setInspectorTab("shopping");
@@ -749,6 +1003,7 @@ export default function App() {
         <nav>
           <button className={page === "projects" ? "nav-active" : ""} onClick={() => { if (shoppingDirty && !window.confirm("购物清单有未保存修改，离开项目会放弃这些修改。确认继续？")) return; setShoppingDirty(false); setPage("projects"); void refreshProjects(); }}><span>⌂</span>我的项目</button>
           <button className={page === "new" ? "nav-active" : ""} onClick={openNewDesign}><span>＋</span>新建设计</button>
+          <button className={page === "photo-shopping" ? "nav-active" : ""} onClick={openPhotoShopping}><span>⌕</span>图片找家具</button>
           <button className={page === "settings" ? "nav-active" : ""} onClick={openSettings}><span>⚙</span>设置</button>
         </nav>
         <div className={`runtime-card ${providerSettings?.runtimeReady ? "" : "runtime-warning"}`}><span className="status-dot" /><div><strong>{providerSettings?.runtimeReady ? "Pi Runtime 已连接" : "AI Provider 待配置"}</strong><small>{providerSettings?.runtimeReady ? `${providerSettings.imageModel} · 本地版本存储` : "已有项目仍可查看"}</small></div></div>
@@ -756,7 +1011,7 @@ export default function App() {
 
       <main>
         <header className="topbar">
-          <div><span className="eyebrow">ZHǓYÁN WORKSPACE</span><h1>{page === "new" ? "创建新设计" : page === "project" ? project?.title : page === "settings" ? "设置" : "我的项目"}</h1></div>
+          <div><span className="eyebrow">ZHǓYÁN WORKSPACE</span><h1>{page === "new" ? "创建新设计" : page === "project" ? project?.title : page === "photo-shopping" ? "图片找家具" : page === "settings" ? "设置" : "我的项目"}</h1></div>
           {page === "settings" ? <button className="ghost" onClick={() => { setProviderForm((current) => ({ ...current, apiKey: "" })); setPage("projects"); void refreshProjects(); }}>返回项目</button> : <button className="primary small" onClick={openNewDesign}>＋ 新建设计</button>}
         </header>
 
@@ -766,6 +1021,7 @@ export default function App() {
         {page === "projects" && (
           <section className="content projects-page">
             <div className="section-heading"><div><h2>{projectFilter === "archived" ? "已归档项目" : "继续你的空间设计"}</h2><p>{projectFilter === "archived" ? "归档只隐藏项目，不删除 Original 或任何版本。" : "项目和所有历史版本保存在本地，不会覆盖原图。"}</p></div><div className="project-filter"><button className={projectFilter === "active" ? "active" : ""} onClick={() => setProjectFilter("active")}>进行中</button><button className={projectFilter === "archived" ? "active" : ""} onClick={() => setProjectFilter("archived")}>已归档</button><span>{projects.length} 个项目</span></div></div>
+            {projectFilter === "active" && resumableConcepts.length > 0 && <div className="resumable-concepts"><h3>待继续的四格方案</h3><p>这些方案已经生成成功。继续选择不会再次产生四格费用。</p>{resumableConcepts.map((item) => <div className="resumable-concept" key={item.conceptId}><div><strong>{item.projectTitle || "未命名设计草稿"}</strong><small>{item.styleName || "基础风格"} · {formatDate(item.createdAt)}</small></div><div><button className="primary small" disabled={conceptRecoveryLoading} onClick={() => void resumeSavedConcept(item.conceptId)}>继续选择 A/B/C/D</button><button className="ghost" disabled={conceptRecoveryLoading} onClick={() => void abandonSavedConcept(item.conceptId)}>放弃</button></div></div>)}</div>}
             {loading ? <EmptyState title="正在读取本地项目…" /> : projects.length === 0 ? (
               projectFilter === "archived" ? <EmptyState title="还没有归档项目" /> : <EmptyState title="还没有设计项目" action="上传第一张房间照片" onAction={openNewDesign} />
             ) : (
@@ -782,6 +1038,27 @@ export default function App() {
                 {projectFilter === "active" && <button className="new-project-card" onClick={openNewDesign}><span>＋</span><strong>创建新项目</strong><small>从一张真实房间照片开始</small></button>}
               </div>
             )}
+          </section>
+        )}
+
+        {page === "photo-shopping" && (
+          <section className="content photo-shopping-page">
+            <div className="section-heading"><div><h2>上传一张照片，逐件找家具</h2><p>一次识别多件家具软装；同款可合并、异款可拆分，每件独立搜索。</p></div><span>{photoShoppingLists.length} 个已保存清单</span></div>
+            <div className="photo-shopping-layout">
+              <aside className="photo-list-sidebar"><button className="primary" onClick={() => { setPhotoShoppingImage(null); setPhotoShoppingList(null); setPhotoShoppingTitle(""); setPhotoShoppingRights(false); }}>＋ 新照片</button>{photoShoppingLists.map((list) => <button key={list.listId} className={photoShoppingList?.listId === list.listId ? "active" : ""} onClick={() => void openPhotoShoppingList(list.listId)}><img src={list.sourceImageUrl} alt="" /><div><strong>{list.title}</strong><small>{list.itemCount} 项 · 已购 {list.purchasedCount}</small></div></button>)}</aside>
+              <div className="photo-shopping-main">
+                <div className="panel photo-source-panel">
+                  {!photoShoppingImage ? <button className="reference-upload" onClick={() => void choosePhotoShoppingImage()}><span>⌕</span><div><strong>选择室内或家具照片</strong><small>支持 JPG、PNG、WebP；可包含多件家具和软装</small></div></button> : <div className="photo-source-preview"><img src={photoShoppingImage.previewUrl} alt="待识别照片" /><div><label>清单名称<input value={photoShoppingTitle} onChange={(event) => { setPhotoShoppingTitle(event.target.value); if (photoShoppingList) setPhotoShoppingDirty(true); }} maxLength={120} /></label>{!photoShoppingList && <label className="rights-check"><input type="checkbox" checked={photoShoppingRights} onChange={(event) => setPhotoShoppingRights(event.target.checked)} />我确认拥有该图片或已获得视觉分析使用权</label>}<p>不会识别品牌、型号、价格或精确尺寸；艺术品不会按原作品复制。</p><div><button className="ghost" disabled={photoShoppingLoading} onClick={() => void choosePhotoShoppingImage()}>更换照片</button>{!photoShoppingList && <button className="primary" disabled={!photoShoppingRights || providerSettings?.runtimeReady !== true || photoShoppingLoading} onClick={() => void analyzeSelectedPhoto()}>{providerSettings?.runtimeReady !== true ? "请先配置 AI Provider" : "确认费用并开始识别"}</button>}</div></div></div>}
+                </div>
+                {photoShoppingList && <div className="photo-shopping-results"><div className="shopping-heading"><div><h3>{photoShoppingList.title}</h3><p>{photoShoppingList.summary}</p></div><span>{photoShoppingList.items.length} 项</span></div><div className="shopping-toolbar photo-shopping-toolbar"><button className="ghost" disabled={photoShoppingList.items.length >= 20} onClick={addPhotoShoppingItem}>＋ 补充漏识别物品</button><button className="ghost danger" onClick={() => void abandonCurrentPhotoShoppingList()}>放弃清单</button><button className="primary" disabled={!photoShoppingDirty || shoppingSaving} onClick={() => void saveCurrentPhotoShoppingList()}>{shoppingSaving ? "保存中…" : photoShoppingDirty ? "保存修改" : "已保存"}</button></div>{photoShoppingDirty && <div className="shopping-unsaved">有未保存修改；保存后才能使用平台搜索。</div>}<div className="shopping-items">{photoShoppingList.items.map((item) => <div className={`shopping-item ${item.included ? "" : "excluded"}`} key={item.id}>
+                  <div className="shopping-item-title"><label><input type="checkbox" checked={item.included} onChange={(event) => updatePhotoShoppingItem(item.id, { included: event.target.checked })} />{item.included ? "纳入" : "排除"}</label><span className={`priority priority-${item.confidence}`}>置信度 {item.confidence === "high" ? "高" : item.confidence === "low" ? "低" : "中"}</span></div>
+                  <label>名称<input value={item.name} onChange={(event) => updatePhotoShoppingItem(item.id, { name: event.target.value })} /></label><div className="shopping-row"><label>类别<input value={item.category} onChange={(event) => updatePhotoShoppingItem(item.id, { category: event.target.value })} /></label><label>数量<input type="number" min="1" max="20" value={item.quantity} onChange={(event) => updatePhotoShoppingItem(item.id, { quantity: Math.max(1, Math.min(20, Number(event.target.value) || 1)) })} /></label><label>优先级<select value={item.priority} onChange={(event) => updatePhotoShoppingItem(item.id, { priority: event.target.value as ShoppingItem["priority"] })}><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select></label></div>
+                  <div className="shopping-row"><label>颜色<input value={item.color} onChange={(event) => updatePhotoShoppingItem(item.id, { color: event.target.value })} /></label><label>材质观感<input value={item.material} onChange={(event) => updatePhotoShoppingItem(item.id, { material: event.target.value })} /></label></div><label>造型特征<input value={item.style} onChange={(event) => updatePhotoShoppingItem(item.id, { style: event.target.value })} /></label><label>尺寸实测建议<textarea value={item.sizeGuidance} onChange={(event) => updatePhotoShoppingItem(item.id, { sizeGuidance: event.target.value })} /></label><label>购物搜索词<input value={item.searchKeywords} onChange={(event) => updatePhotoShoppingItem(item.id, { searchKeywords: event.target.value })} /></label><label>备注<textarea value={item.notes} onChange={(event) => updatePhotoShoppingItem(item.id, { notes: event.target.value })} /></label>
+                  <div className="photo-item-tools"><button onClick={() => splitPhotoShoppingItem(item)} disabled={item.quantity < 2 || photoShoppingList.items.length >= 20}>拆分 1 件</button><button onClick={() => mergePhotoShoppingItem(item)}>合并同类别</button><button className="danger" onClick={() => { setPhotoShoppingList({ ...photoShoppingList, items: photoShoppingList.items.filter((candidate) => candidate.id !== item.id) }); setPhotoShoppingDirty(true); }} disabled={photoShoppingList.items.length <= 1}>删除误识别</button></div>
+                  <div className="shopping-search-box"><div className="shopping-search-heading"><strong>逐件搜索</strong><small>只打开固定平台搜索页</small></div><div className="shopping-search-modes">{SHOPPING_SEARCH_MODES.map((mode) => <button key={mode.id} className={(shoppingSearchModes[item.id] || "broad") === mode.id ? "active" : ""} onClick={() => setShoppingSearchModes((current) => ({ ...current, [item.id]: mode.id }))}>{mode.label}</button>)}</div><div className="shopping-platforms">{SHOPPING_SEARCH_PLATFORMS.map((platform) => <button key={platform.id} disabled={photoShoppingDirty || !item.included} onClick={() => void searchPhotoShoppingItem(item, platform.id)}>{platform.label} ↗</button>)}<button disabled={photoShoppingDirty || !item.included} onClick={() => void copyPhotoKeywords(item)}>复制搜索词</button></div></div><div className="shopping-item-actions"><label><input type="checkbox" checked={item.purchased} onChange={(event) => updatePhotoShoppingItem(item.id, { purchased: event.target.checked })} />已购买</label></div>
+                </div>)}</div><div className="shopping-disclaimer">{photoShoppingList.disclaimer}</div></div>}
+              </div>
+            </div>
           </section>
         )}
 
@@ -835,9 +1112,11 @@ export default function App() {
               </div>
               <div className="panel requirements-panel"><PanelTitle number="3" title="补充要求" note="只写你特别在意的内容，其余由系统保守处理" />
                 <label>还有什么特别要求？（可选）<textarea value={form.userInstructions} onChange={(event) => setForm({ ...form, userInstructions: event.target.value })} placeholder="例如：保留电视和空调；沙发不要太大；不要新增墙画；整体明亮一些。" /></label>
-                <details className="advanced-settings"><summary>高级设置</summary><div className="advanced-settings-content"><div className="field-row"><label>项目名称<input value={form.projectTitle} onChange={(event) => setForm({ ...form, projectTitle: event.target.value })} placeholder="例如：客厅参考图改造" /></label><label>项目 ID（可选）<input value={form.projectId} onChange={(event) => setForm({ ...form, projectId: event.target.value })} placeholder="living-room-01" /></label></div><div className="constraint-grid"><label>必须保留<textarea value={form.keepItems} onChange={(event) => setForm({ ...form, keepItems: event.target.value })} /></label><label>允许修改<textarea value={form.allowedChanges} onChange={(event) => setForm({ ...form, allowedChanges: event.target.value })} /></label><label>禁止修改<textarea value={form.forbiddenChanges} onChange={(event) => setForm({ ...form, forbiddenChanges: event.target.value })} /></label></div><div className="toggles"><label><input type="checkbox" checked={form.rentalFriendly} disabled={Boolean(furnishingSetAnalysis)} onChange={(event) => setForm({ ...form, rentalFriendly: event.target.checked })} /><span>租房友好 / 可逆软装{furnishingSetAnalysis ? "（整体参考由逐项动作控制）" : ""}</span></label><label><input type="checkbox" checked={furnishingSetAnalysis ? furnishingSetOptions.allowGenericWallArt : form.allowWallArt} disabled={Boolean(furnishingSetAnalysis)} onChange={(event) => setForm({ ...form, allowWallArt: event.target.checked })} /><span>允许新增墙画{furnishingSetAnalysis ? "（请在参考内容中调整）" : ""}</span></label></div></div></details>
+                <details className="advanced-settings"><summary>高级设置</summary><div className="advanced-settings-content"><div className="field-row"><label>项目名称<input value={form.projectTitle} onChange={(event) => setForm({ ...form, projectTitle: event.target.value })} placeholder="例如：客厅参考图改造" /><small>四格阶段仅保留为当前草稿；生成正式 V1 成功后才会创建并保存项目。</small></label><label>项目 ID（可选）<input value={form.projectId} onChange={(event) => setForm({ ...form, projectId: event.target.value })} placeholder="living-room-01" /></label></div><div className="constraint-grid"><label>必须保留<textarea value={form.keepItems} onChange={(event) => setForm({ ...form, keepItems: event.target.value })} /></label><label>允许修改<textarea value={form.allowedChanges} onChange={(event) => setForm({ ...form, allowedChanges: event.target.value })} /></label><label>禁止修改<textarea value={form.forbiddenChanges} onChange={(event) => setForm({ ...form, forbiddenChanges: event.target.value })} /></label></div><div className="toggles"><label><input type="checkbox" checked={form.rentalFriendly} disabled={Boolean(furnishingSetAnalysis)} onChange={(event) => setForm({ ...form, rentalFriendly: event.target.checked })} /><span>租房友好 / 可逆软装{furnishingSetAnalysis ? "（整体参考由逐项动作控制）" : ""}</span></label><label><input type="checkbox" checked={furnishingSetAnalysis ? furnishingSetOptions.allowGenericWallArt : form.allowWallArt} disabled={Boolean(furnishingSetAnalysis)} onChange={(event) => setForm({ ...form, allowWallArt: event.target.checked })} /><span>允许新增墙画{furnishingSetAnalysis ? "（请在参考内容中调整）" : ""}</span></label></div></div></details>
               </div>
-              <div className="form-actions"><p>{providerSettings?.runtimeReady !== true ? "请先到设置页配置可用的 AI Provider；已有项目和历史版本不会受影响。" : furnishingSetAnalysis ? needsGenericWallArtPermission && !furnishingSetOptions.allowGenericWallArt ? "已选择墙画/墙饰，请先在调整内容中开启通用墙画。" : `将采用参考图中确认的 ${furnishingSetOptions.selectedItems.length} 件内容；点击生成即再次确认参考图可用于本次设计。` : referenceAnalysis ? `将使用“${referenceAnalysis.styleName}”确认后的氛围配方；参考原图不会直接发送给图片生成模型。` : useBasicStyleFallback ? `没有参考图，将使用${RECIPES.find((item) => item.id === form.recipeId)?.name || "基础风格"}生成。` : "请先上传并分析参考照片；没有参考图时可使用上方基础风格入口。"}</p><button className="primary" disabled={providerSettings?.runtimeReady !== true || !form.image || (!referenceAnalysis && !furnishingSetAnalysis && !useBasicStyleFallback) || Boolean(activeRun) || analyzingReference || Boolean(referenceAnalysis && !hasSelectedReferenceStyle) || Boolean(furnishingSetAnalysis && !hasSelectedFurnishingSet)} onClick={() => void createDesign()}>{providerSettings?.runtimeReady !== true ? "先配置 AI Provider" : "生成设计图"}</button></div>
+              <div className="panel concept-panel"><PanelTitle number="4" title="四格布局预选" note="先用一次图片调用生成 A/B/C/D，再由你选择是否生成正式 V1" />
+                {!layoutConcept ? <div className="concept-empty"><p>四格概念图是独立决策材料，不会进入 Original/V1/V2 版本树，也不会占用正式版本号。</p><button className="primary" disabled={providerSettings?.runtimeReady !== true || !form.image || (!referenceAnalysis && !furnishingSetAnalysis && !useBasicStyleFallback) || Boolean(activeRun) || analyzingReference || Boolean(referenceAnalysis && !hasSelectedReferenceStyle) || Boolean(furnishingSetAnalysis && !hasSelectedFurnishingSet)} onClick={() => void createLayoutConcept()}>{providerSettings?.runtimeReady !== true ? "先配置 AI Provider" : "生成四格布局（一次费用）"}</button></div> : <><div className="concept-grid">{layoutConcept.options.map((option) => <button key={option.id} className={selectedConceptOption === option.id ? "concept-option active" : "concept-option"} onClick={() => selectConceptOption(option.id)}><img src={option.imageUrl} alt={`布局方案 ${option.id}`} /><span>{option.id}</span>{selectedConceptOption === option.id && <em>已选择</em>}</button>)}</div><div className="concept-actions"><p>{selectedConceptOption ? `已选择方案 ${selectedConceptOption}。正式图仍以原房间图为唯一空间事实。` : "请选择一个布局方向；选择本身不产生费用。"}</p><button className="ghost" disabled={Boolean(activeRun)} onClick={() => void createLayoutConcept()}>重新生成四格</button><button className="primary" disabled={!selectedConceptOption || Boolean(activeRun)} onClick={() => void createDesign()}>按方案 {selectedConceptOption || "—"} 生成正式 V1（再次费用）</button></div></>}
+              </div>
             </div>
           </section>
         )}
@@ -850,10 +1129,14 @@ export default function App() {
               <p className="disclaimer">AI 效果图用于软装方向可视化，可能存在局部生成式重绘，不作为施工图或精确尺寸依据。</p>
             </div>
             <aside className="inspector">
-              <div className="project-meta"><span className="status-dot" /><div><strong>{project.isArchived ? "项目已归档" : `${project.latestCompletedVersionId?.toUpperCase()} 已保存`}</strong><small>{project.counts.completed} 个完成版本 · {project.isArchived ? "只读保留" : "本地存储"}</small></div></div>
+              <div className="project-meta"><span className="status-dot" /><div><strong>{project.isArchived
+                    ? "项目已归档"
+                    : project.latestCompletedVersionId
+                      ? `${project.latestCompletedVersionId.toUpperCase()} 已保存`
+                      : "暂无已完成设计"}</strong><small>{project.counts.completed} 个完成版本 · {project.isArchived ? "只读保留" : "本地存储"}</small></div></div>
               <div className="inspector-tabs"><button className={inspectorTab === "design" ? "active" : ""} onClick={() => changeInspectorTab("design")}>设计</button><button className={inspectorTab === "shopping" ? "active" : ""} onClick={() => changeInspectorTab("shopping")}>购物清单{shoppingList ? ` · ${shoppingIncludedCount}` : ""}</button></div>
               {inspectorTab === "design" ? <>
-              <div className="inspector-section project-management"><h3>项目管理</h3><label>项目名称<input value={renameTitle} disabled={managingProject} onChange={(event) => setRenameTitle(event.target.value)} /></label><div><button className="ghost" disabled={managingProject || !renameTitle.trim() || renameTitle.trim() === project.title} onClick={() => void manageCurrentProject("rename")}>保存名称</button>{project.isArchived ? <button className="restore-button" disabled={managingProject} onClick={() => void manageCurrentProject("restore")}>恢复项目</button> : <button className="archive-button" disabled={managingProject || Boolean(activeRun)} onClick={() => void manageCurrentProject("archive")}>归档项目</button>}</div><small>归档不会删除 Original、效果图或版本历史。</small></div>
+              <div className="inspector-section project-management"><h3>项目管理</h3><label>项目名称<input value={renameTitle} disabled={managingProject || Boolean(activeRun)} maxLength={120} onChange={(event) => setRenameTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !managingProject && !activeRun && renameTitle.trim() && renameTitle.trim() !== project.title) void manageCurrentProject("rename"); }} /></label><div><button className="ghost" disabled={managingProject || Boolean(activeRun) || !renameTitle.trim() || renameTitle.trim() === project.title} onClick={() => void manageCurrentProject("rename")}>保存名称</button>{project.isArchived ? <button className="restore-button" disabled={managingProject} onClick={() => void manageCurrentProject("restore")}>恢复项目</button> : <button className="archive-button" disabled={managingProject || Boolean(activeRun)} onClick={() => void manageCurrentProject("archive")}>归档项目</button>}</div><small>{activeRun ? "当前 AI 任务结束后可保存名称或管理项目。" : "按 Enter 或点击“保存名称”。归档不会删除 Original、效果图或版本历史。"}</small></div>
               <div className="inspector-section"><h3>当前版本</h3><dl><div><dt>版本</dt><dd>{selectedVersionId === "original" ? "Original" : selectedVersionName}</dd></div><div><dt>基于</dt><dd>{selectedVersion?.parentVersionId?.toUpperCase() || "—"}</dd></div><div><dt>模式</dt><dd>{selectedVersion?.styleSource === "reference_furnishing_set" ? "整体参考" : selectedVersion?.styleSource === "extracted_text_recipe" ? "只参考氛围" : selectedVersionId === "original" ? "原始房间" : "基础风格"}</dd></div>{selectedVersion?.selectedItemCount ? <div><dt>迁移物品</dt><dd>{selectedVersion.selectedItemCount} 件（替换 {selectedVersion.selectedReplaceCount || 0} / 新增 {selectedVersion.selectedAddCount || 0}）</dd></div> : null}<div><dt>风格底座</dt><dd>{selectedVersion?.styleName || RECIPES.find((item) => item.id === selectedVersion?.recipeId)?.name || "原始房间"}</dd></div><div><dt>模型</dt><dd>{selectedVersion?.modelId || "—"}</dd></div></dl>{selectedVersion?.status === "completed" && selectedVersion.imageUrl && <div className="choose-design-card"><strong>{shoppingList ? `${selectedVersionName} 已有购物清单` : `满意 ${selectedVersionName} 的设计？`}</strong><p>{shoppingList ? "进入该版本清单继续编辑、勾选购买或搜索商品。" : "选定后将对比 Original 与当前效果图，并在你确认后调用一次视觉模型生成版本购物清单。"}</p><button className="primary" disabled={(providerSettings?.runtimeReady !== true && !shoppingList) || shoppingGenerating || shoppingLoading || Boolean(activeRun) || Boolean(project.isArchived && !shoppingList)} onClick={() => void chooseCurrentDesignForShopping()}>{shoppingList ? "查看当前版本购物清单" : project.isArchived ? "恢复项目后生成购物清单" : shoppingLoading ? "正在检查购物清单…" : "选定此设计并生成购物清单"}</button></div>}</div>
               <div className="inspector-section revision-box"><h3>继续修改</h3><p>{project.isArchived ? "归档项目为只读状态，恢复后才能继续修改。" : "只写需要变化的内容，未请求部分会要求保持。"}</p><textarea value={revision} disabled={project.isArchived} onChange={(event) => setRevision(event.target.value)} placeholder="例如：地毯换成浅暖灰，保留窗帘，其他全部不变。" /><button className="primary" disabled={providerSettings?.runtimeReady !== true || project.isArchived || !revision.trim() || selectedVersionId === "original" || Boolean(activeRun)} onClick={() => void createRevision()}>{providerSettings?.runtimeReady !== true ? "请先配置 AI Provider" : "创建新版本"}</button>{selectedVersionId === "original" && !project.isArchived && <small>请先选择一个成功设计版本作为修改基础。</small>}</div>
               {abnormalVersions.length > 0 && <div className="failure-section"><h3>异常任务</h3>{[...abnormalVersions].reverse().map((version) => <div className="failure-card" key={version.versionId}><div className="failure-heading"><span className={`version-status ${version.displayStatus}`} /><div><strong>{versionLabel(version)} · {failureStatusLabel(version.displayStatus)}</strong><small>{version.failureStage ? `停止于：${STAGE_LABELS[version.failureStage] || version.failureStage}` : "未记录失败阶段"}</small></div></div><p>{version.error || "任务未正常完成。"}</p>{version.retryBlockedReason && <p className="retry-blocked">{version.retryBlockedReason}</p>}{version.retryable && !project.isArchived && <button className="retry-button" disabled={providerSettings?.runtimeReady !== true || Boolean(activeRun)} onClick={() => void retryVersion(version.versionId)}>↻ {providerSettings?.runtimeReady !== true ? "请先配置 AI Provider" : "重新尝试并创建新版本"}</button>}</div>)}</div>}
@@ -889,7 +1172,8 @@ export default function App() {
       </main>
 
       {activeRun && <GenerationOverlay run={activeRun} onCancel={() => void window.zhuyan.cancelRun(activeRun.runId)} />}
-      {shoppingGenerating && <ShoppingListOverlay stage={shoppingStage} message={shoppingProgress} onCancel={() => void window.zhuyan.cancelShoppingList()} />}
+      {shoppingGenerating && <ShoppingListOverlay kind="design" stage={shoppingStage} message={shoppingProgress} onCancel={() => void window.zhuyan.cancelShoppingList()} />}
+      {photoShoppingAnalyzing && <ShoppingListOverlay kind="photo" stage={shoppingStage} message={shoppingProgress} onCancel={() => void window.zhuyan.cancelShoppingList()} />}
     </div>
   );
 }
@@ -912,10 +1196,16 @@ function EmptyState({ title, action, onAction }: { title: string; action?: strin
   return <div className="empty-state"><span>◇</span><h2>{title}</h2>{action && <button className="primary" onClick={onAction}>{action}</button>}</div>;
 }
 
-function ShoppingListOverlay({ stage, message, onCancel }: { stage: ShoppingListEvent["stage"]; message: string; onCancel: () => void }) {
+function ShoppingListOverlay({ kind, stage, message, onCancel }: { kind: "design" | "photo"; stage: ShoppingListEvent["stage"]; message: string; onCancel: () => void }) {
   const stageIndex = stage === "validating_shopping_list" ? 0 : stage === "analyzing_shopping_list" ? 1 : 2;
-  const labels = ["验证项目与版本", "对比 Original 与效果图", "保存版本购物清单"];
-  return <div className="overlay"><div className="generation-card shopping-generation-card"><div className="pi-orbit"><span>清单</span></div><span className="eyebrow">REAL VISUAL ANALYSIS</span><h2>{stageIndex === 0 ? "正在验证成功设计版本" : stageIndex === 1 ? "正在提取家具与软装" : "正在保存购物清单"}</h2><p>{message}</p><div className="shopping-analysis-stages">{labels.map((label, index) => <div className={index < stageIndex ? "done" : index === stageIndex ? "active" : ""} key={label}><span>{index < stageIndex ? "✓" : index + 1}</span><em>{label}</em></div>)}</div><div className="progress-note">这里不显示模拟百分比。只有本次首次分析会调用视觉模型，编辑、勾选、保存和购物搜索均不调用模型。</div><button className="ghost danger" onClick={onCancel}>取消购物清单分析</button></div></div>;
+  const photoMode = kind === "photo";
+  const labels = photoMode
+    ? ["验证照片与使用权", "识别多件家具软装", "保存独立购物清单"]
+    : ["验证项目与版本", "对比 Original 与效果图", "保存版本购物清单"];
+  const titles = photoMode
+    ? ["正在验证所选照片", "住颜 AI 正在识别家具软装", "正在保存识别结果"]
+    : ["正在验证成功设计版本", "正在提取家具与软装", "正在保存购物清单"];
+  return <div className="overlay"><div className="generation-card shopping-generation-card"><div className="pi-orbit"><span>{photoMode ? "识别" : "清单"}</span></div><span className="eyebrow">REAL VISUAL ANALYSIS</span><h2>{titles[stageIndex]}</h2><p>{message}</p><div className="shopping-analysis-stages">{labels.map((label, index) => <div className={index < stageIndex ? "done" : index === stageIndex ? "active" : ""} key={label}><span>{index < stageIndex ? "✓" : index + 1}</span><em>{label}</em></div>)}</div><div className="progress-note">不显示模拟百分比，每一步来自真实工具事件。视觉分析可能需要几分钟，请保持应用开启；编辑、保存和平台搜索不会再次调用模型。</div><button className="ghost danger" onClick={onCancel}>{photoMode ? "取消图片识别" : "取消购物清单分析"}</button></div></div>;
 }
 
 function GenerationOverlay({ run, onCancel }: { run: RunEvent; onCancel: () => void }) {

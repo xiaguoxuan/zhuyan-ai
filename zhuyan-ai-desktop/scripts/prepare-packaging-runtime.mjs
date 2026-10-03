@@ -38,7 +38,7 @@ async function walk(root, prefix = "") {
 }
 
 const sourcePackage = JSON.parse(await readFile(path.join(sourceRoot, "package.json"), "utf8"));
-if (sourcePackage.version !== "0.8.2") {
+if (sourcePackage.version !== "0.9.0") {
   throw new Error(`Unexpected soft-furnish Runtime version: ${sourcePackage.version}`);
 }
 

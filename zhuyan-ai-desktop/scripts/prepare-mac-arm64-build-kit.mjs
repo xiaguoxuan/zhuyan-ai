@@ -6,14 +6,18 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(scriptDir, "..");
 const piagentRoot = path.resolve(desktopRoot, "..");
-const outputRoot = path.resolve(process.argv[2] || path.join(piagentRoot, "mac-arm64-build-kit"));
+const targetArchitecture = process.argv[3] || "arm64";
+if (!new Set(["arm64", "x64"]).has(targetArchitecture)) throw new Error(`Unsupported Mac build-kit architecture: ${targetArchitecture}`);
+const outputRoot = path.resolve(process.argv[2] || path.join(piagentRoot, `mac-${targetArchitecture}-build-kit`));
 const desktopOutput = path.join(outputRoot, "zhuyan-ai-desktop");
 const manifestSource = path.join(desktopRoot, "private-audit-input", "reference-library-sha256.json");
-const expectedDesktopVersion = "0.10.4";
-const expectedRuntimeVersion = "0.8.2";
+const expectedDesktopVersion = "0.11.0";
+const expectedRuntimeVersion = "0.9.0";
 
 const desktopFiles = [
   "index.html",
+  "assets/zhuyan-ai.ico",
+  "assets/zhuyan-ai.png",
   "package.json",
   "package-lock.json",
   "tsconfig.json",
@@ -44,7 +48,7 @@ const externalFiles = [
   [path.join(piagentRoot, "pi-soft-furnish-agent", "package.json"), path.join(outputRoot, "pi-soft-furnish-agent", "package.json")],
   [path.join(piagentRoot, "pi-soft-furnish-agent", "extensions", "soft-furnish.ts"), path.join(outputRoot, "pi-soft-furnish-agent", "extensions", "soft-furnish.ts")],
   [path.join(piagentRoot, "pi-soft-furnish-agent", "data", "style-recipes.json"), path.join(outputRoot, "pi-soft-furnish-agent", "data", "style-recipes.json")],
-  [path.join(piagentRoot, "scripts", "build-zhuyan-mac-arm64.command"), path.join(outputRoot, "build-zhuyan-mac-arm64.command")],
+  [path.join(piagentRoot, "scripts", `build-zhuyan-mac-${targetArchitecture}.command`), path.join(outputRoot, `build-zhuyan-mac-${targetArchitecture}.command`)],
   [manifestSource, path.join(desktopOutput, "private-audit-input", "reference-library-sha256.json")],
 ];
 
@@ -73,7 +77,8 @@ for (const [source, destination] of externalFiles) copied.push(await copy(source
 copied.sort((left, right) => left.path.localeCompare(right.path));
 const kitManifest = {
   schemaVersion: 1,
-  purpose: "Zhuyan AI macOS arm64 private build kit whitelist",
+  purpose: `Zhuyan AI macOS ${targetArchitecture} private build kit whitelist`,
+  targetArchitecture,
   generatedAt: new Date().toISOString(),
   desktopVersion: expectedDesktopVersion,
   runtimeVersion: expectedRuntimeVersion,
@@ -83,11 +88,12 @@ const kitManifest = {
   files: copied,
 };
 await writeFile(path.join(outputRoot, "build-kit-manifest.json"), `${JSON.stringify(kitManifest, null, 2)}\n`, "utf8");
-console.log("ZHUYAN_MAC_ARM64_BUILD_KIT_OK");
+console.log(`ZHUYAN_MAC_${targetArchitecture.toUpperCase()}_BUILD_KIT_OK`);
 console.log(`OUTPUT: ${outputRoot}`);
 console.log(`FILES: ${copied.length + 1}`);
 console.log(`DESKTOP_VERSION: ${expectedDesktopVersion}`);
 console.log(`RUNTIME_VERSION: ${expectedRuntimeVersion}`);
+console.log(`TARGET_ARCHITECTURE: ${targetArchitecture}`);
 console.log("REFERENCE_IMAGE_BYTES: 0");
 console.log("PROVIDER_CREDENTIALS: 0");
 console.log("USER_PROJECTS: 0");
